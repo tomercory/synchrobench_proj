@@ -23,7 +23,7 @@
 
 #include "skiplist.h"	
 
-unsigned int levelmax;
+extern unsigned int levelmax;
 
 /*
  * Returns a random level for inserting a new node, results are hardwired to p=0.5, min=1, max=32.

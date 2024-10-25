@@ -26,7 +26,7 @@
 
 #include "hashtable-lock.h"
 
-unsigned int maxhtlength;
+extern unsigned int maxhtlength;
 
 void ht_delete(ht_intset_t *set) {
 	node_l_t *node, *next;

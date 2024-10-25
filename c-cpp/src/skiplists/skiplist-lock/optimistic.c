@@ -28,7 +28,7 @@
 
 #include "optimistic.h"
 
-unsigned int levelmax;
+extern unsigned int levelmax;
 
 inline int ok_to_delete(sl_node_t *node, int found) {
   return (node->fullylinked && ((node->toplevel-1) == found) && !node->marked);
