@@ -290,6 +290,7 @@ static int bg_raise_nlevel(inode_t *inode, ptst_t *ptst)
                                 inew = inode_new(above_prev->right, NULL,
                                                  node, ptst);
                                 above_prev->right.right_p = inew;
+                                above_prev->right.right_k = inew->node->key;
                                 node->level = 1;
                                 above_prev = inode = above = inew;
                         }
@@ -328,6 +329,7 @@ static int bg_raise_ilevel(inode_t *iprev, inode_t *iprev_tall,
                 while (index->node->val == index->node) {
                         /* skip deleted nodes */
                         iprev->right.right_p = inext;
+                        iprev->right.right_k = index->right.right_k;
                         if (NULL == inext)
                                 break;
 
@@ -352,6 +354,7 @@ static int bg_raise_ilevel(inode_t *iprev, inode_t *iprev_tall,
                         inew = inode_new(above_prev->right, index,
                                          index->node, ptst);
                         above_prev->right.right_p = inew;
+                        above_prev->right.right_k = inew->node->key;
                         index->node->level = height + 1;
                         above_prev = above = iprev_tall = inew;
                 }
