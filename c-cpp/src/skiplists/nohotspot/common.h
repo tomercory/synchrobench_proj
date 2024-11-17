@@ -12,6 +12,9 @@
 #define CAS(_m, _o, _n) \
     AO_compare_and_swap_full(((volatile AO_t*) _m), ((AO_t) _o), ((AO_t) _n))
 
+#define WIDE_CAS(_m, _o1, _o2, _n1, _n2) \
+    AO_compare_double_and_swap_double_full(((volatile AO_t*) _m), ((AO_t) _o1), ((AO_t) _o2), ((AO_t) _n1), , ((AO_t) _n2))
+
 #define FAI(a) AO_fetch_and_add_full((volatile AO_t*) (a), 1)
 #define FAD(a) AO_fetch_and_add_full((volatile AO_t*) (a), -1)
 

@@ -531,7 +531,8 @@ int main(int argc, char **argv)
         // leak - we cut off all the nodes in the index levels
         // without reclaiming them - this is only a one-off though
         ptst = ptst_critical_enter();
-        set->top = inode_new(NULL, NULL, set->head, ptst);
+        kp_t kp_t_instance = {NULL, MAX_KEY};
+        set->top = inode_new(kp_t_instance, NULL, set->head, ptst);
         ptst_critical_exit(ptst);
         set->head->level = 1;
         temp = set->head->next;
