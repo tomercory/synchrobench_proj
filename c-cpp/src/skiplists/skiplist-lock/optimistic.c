@@ -39,27 +39,26 @@ inline int ok_to_delete(sl_node_t *node, int found) {
  * original paper. A fast parameter has been added to speed-up the search 
  * so that the function quits as soon as the searched element is found.
  */
-inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast) {
-  int found, i;
-  sl_node_t *pred, *curr;
-	
-  found = -1;
-  pred = set->head;
-	
-  for (i = (pred->toplevel - 1); i >= 0; i--) {
-    curr = pred->next[i];
-    while (val > curr->val) {
-      pred = curr;
-      curr = pred->next[i];
+inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast)
+{
+    int found, i;
+    sl_node_t *curr;
+
+    found = -1;
+    curr = set->head;
+
+    for (i = (curr->toplevel - 1); i >= 0; i--) {
+        while (val > curr->next_arr[i].next_val) {
+            curr = curr->next_arr[i].next;
+        }
+        if (preds != NULL)
+            preds[i] = curr;
+        succs[i] = curr->next_arr[i].next;
+        if (found == -1 && val == curr->next_arr[i].next_val) {
+            found = i;
+        }
     }
-    if (preds != NULL) 
-      preds[i] = pred;
-    succs[i] = curr;
-    if (found == -1 && val == curr->val) {
-      found = i;
-    }
-  }
-  return found;
+    return found;
 }
 
 /*
@@ -68,7 +67,7 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
  * memory at right places to avoid the use of a stop-the-world garbage 
  * collector. 
  */
-int optimistic_find(sl_intset_t *set, val_t val) { 
+int optimistic_find(sl_intset_t *set, val_t val) {
   int result, found;
 	
   sl_node_t **preds = pthread_getspecific(preds_key);
@@ -110,7 +109,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
 
   toplevel = get_rand_level();
   backoff = 1;
-	
+
   while (1) {
     found = optimistic_search(set, val, preds, succs, 1);
     if (found != -1) {
@@ -128,18 +127,18 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
       pred = preds[i];
       succ = succs[i];
       if (pred != prev_pred) {
-	if (LOCK(&pred->lock) != 0) 
+	if (LOCK(&pred->lock) != 0)
 	  fprintf(stderr, "Error cannot lock pred->val:%ld\n", (long)pred->val);
 	highest_locked = i;
 	prev_pred = pred;
-      }	
-			
-      valid = (!pred->marked && !succ->marked && 
-	       ((volatile sl_node_t*) pred->next[i] == 
+      }
+
+      valid = (!pred->marked && !succ->marked &&
+	       ((volatile sl_node_t*) pred->next_arr[i].next ==
 		(volatile sl_node_t*) succ));
-    }	
+    }
     if (!valid) {
-      /* Unlock the predecessors before leaving */ 
+      /* Unlock the predecessors before leaving */
       unlock_levels(preds, highest_locked, 11);
       if (backoff > 5000) {
 	timeout.tv_sec = backoff / 5000;
@@ -149,15 +148,18 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
       backoff *= 2;
       continue;
     }
-		
+
     ptst_t *ptst = ptst_critical_enter();
     new_node = sl_new_simple_node(val, toplevel, 2, ptst);
     ptst_critical_exit(ptst);
-    for (i = 0; i < toplevel; i++) {
-      new_node->next[i] = succs[i];
-      preds[i]->next[i] = new_node;
-    }
-		
+      for (i = 0; i < toplevel; i++) {
+          new_node->next_arr[i].next = succs[i];
+          new_node->next_arr[i].next_val = (succs[i] != NULL) ? succs[i]->val : VAL_MAX;
+
+          preds[i]->next_arr[i].next = new_node;
+          preds[i]->next_arr[i].next_val = new_node->val;
+      }
+
     new_node->fullylinked = 1;
     unlock_levels(preds, highest_locked, 12);
     return 1;
@@ -171,7 +173,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
  * (cf. p132 of SIROCCO'07 proceedings).
  */
 int optimistic_delete(sl_intset_t *set, val_t val) {
-  sl_node_t *node_todel, *prev_pred; 
+  sl_node_t *node_todel, *prev_pred;
   sl_node_t *pred, *succ;
   sl_node_t **preds = pthread_getspecific(preds_key);
   sl_node_t **succs = pthread_getspecific(succs_key);
@@ -217,7 +219,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 	  highest_locked = i;
 	  prev_pred = pred;
 	}
-	valid = (!pred->marked && ((volatile sl_node_t*) pred->next[i] == 
+	valid = (!pred->marked && ((volatile sl_node_t*) pred->next_arr[i].next ==
 				   (volatile sl_node_t*)succ));
       }
       if (!valid) {	
@@ -231,9 +233,9 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 	continue;
       }
 			
-      for (i = (toplevel-1); i >= 0; i--) 
-	preds[i]->next[i] = node_todel->next[i];
-      UNLOCK(&node_todel->lock);	
+      for (i = (toplevel-1); i >= 0; i--)
+          preds[i]->next_arr[i] = node_todel->next_arr[i];
+      UNLOCK(&node_todel->lock);
       unlock_levels(preds, highest_locked, 22);
       ptst_t *ptst = ptst_critical_enter();
       sl_delete_node(node_todel, ptst);

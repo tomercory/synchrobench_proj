@@ -78,16 +78,23 @@ int floor_log_2(unsigned int n) {
  */
 sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional, ptst_t *ptst)
 {
-	sl_node_t *node;
-	
+    sl_node_t *node;
+
     node = gc_alloc(ptst, gc_id[0]);
-    node->next = gc_alloc(ptst, gc_id[1]);
-	node->val = val;
-	node->toplevel = toplevel;
-	node->marked = 0;
-	node->fullylinked = 0;
-	INIT_LOCK(&node->lock);
-	return node;
+    node->next_arr = gc_alloc(ptst, gc_id[1]);
+    node->val = val;
+    node->toplevel = toplevel;
+    node->marked = 0;
+    node->fullylinked = 0;
+    INIT_LOCK(&node->lock);
+
+    int i;
+    for (i = 0; i < toplevel; i++) {
+        node->next_arr[i].next = NULL;
+        node->next_arr[i].next_val = VAL_MAX;
+    }
+
+    return node;
 }
 
 /* 
@@ -96,22 +103,24 @@ sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional, ptst_t
  */
 sl_node_t *sl_new_node(val_t val, sl_node_t *next, int toplevel, int transactional, ptst_t *ptst)
 {
-	sl_node_t *node;
-	int i;
-	
-	node = sl_new_simple_node(val, toplevel, transactional, ptst);
-	
-	for (i = 0; i < toplevel; i++)
-		node->next[i] = next;
-	
-	return node;
+    sl_node_t *node;
+    int i;
+
+    node = sl_new_simple_node(val, toplevel, transactional, ptst);
+
+    for (i = 0; i < toplevel; i++) {
+        node->next_arr[i].next = next;
+        node->next_arr[i].next_val = (next != NULL) ? next->val : VAL_MAX;
+    }
+
+    return node;
 }
 
 void sl_delete_node(sl_node_t *n, ptst_t *ptst)
 {
-	DESTROY_LOCK(&n->lock);
-    gc_free(ptst, (void*)n->next, gc_id[1]);
-    gc_free(ptst, (void*)n, gc_id[0]);
+    DESTROY_LOCK(&n->lock);
+    gc_free(ptst, (void *)n->next_arr, gc_id[1]);
+    gc_free(ptst, (void *)n, gc_id[0]);
 }
 
 sl_intset_t *sl_set_new(ptst_t *ptst)
@@ -130,31 +139,32 @@ sl_intset_t *sl_set_new(ptst_t *ptst)
 
 void sl_set_delete(sl_intset_t *set, ptst_t *ptst)
 {
-	sl_node_t *node, *next;
-	
-	node = set->head;
-	while (node != NULL) {
-		next = node->next[0];
-		sl_delete_node(node, ptst);
-		node = next;
-	}
-	free(set);
+    sl_node_t *node, *next;
+
+    node = set->head;
+    while (node != NULL) {
+        next = node->next_arr[0].next;
+        sl_delete_node(node, ptst);
+        node = next;
+    }
+    free(set);
 }
 
 int sl_set_size(sl_intset_t *set)
 {
-	int size = -1;
-	sl_node_t *node;
-	
-	/* We have at least 2 elements */
-	node = set->head->next[0];
-	while (node->next[0] != NULL) {
-		if (node->fullylinked && !node->marked)
-			size++;
-		node = node->next[0];
-	}
-	
-	return size;
+    int size = -1;
+    sl_node_t *node;
+
+    /* We have at least 2 elements */
+    node = set->head->next_arr[0].next;
+    while (node->next_arr[0].next != NULL) {
+        if (node->fullylinked && !node->marked) {
+            size++;
+        }
+        node = node->next_arr[0].next;
+    }
+
+    return size;
 }
 
 /**
@@ -162,6 +172,6 @@ int sl_set_size(sl_intset_t *set)
  */
 void set_subsystem_init(void)
 {
-        gc_id[0]  = gc_add_allocator(sizeof(sl_node_t));
-        gc_id[1]  = gc_add_allocator(levelmax * sizeof(sl_node_t *));
+    gc_id[0] = gc_add_allocator(sizeof(sl_node_t));
+    gc_id[1] = gc_add_allocator(levelmax * sizeof(sl_next_entry_t));
 }
