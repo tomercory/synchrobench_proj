@@ -21,6 +21,7 @@
  * GNU General Public License for more details.
  */
 
+#include <unistd.h>
 #include <assert.h>
 #include <getopt.h>
 #include <limits.h>
@@ -206,6 +207,49 @@ void print_skiplist(struct sl_set *set) {
 		printf("%d nodes of level %d\n", arr[j], j);
 }
 
+void* sanity_test(void *data) {
+    thread_data_t *d = (thread_data_t *)data;
+    unsigned int lsb = d->first;
+    printf("my lsb is: %d\n", lsb);
+    unsigned int key;
+    sleep(1);
+
+    /* Wait on barrier */
+    barrier_cross(d->barrier);
+
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
+        if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %d\n", key);
+        if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %d\n", key);
+        //printf("handled key %d\n", key);
+    }
+
+    printf("%d bulk test done\n", lsb);
+
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
+    }
+
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %d\n", key);
+    }
+
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %d\n", key);
+    }
+
+    printf("%d fine test done\n", lsb);
+
+    return NULL;
+}
 
 void *test(void *data) {
 	int unext, last = -1; 
@@ -554,6 +598,81 @@ int main(int argc, char **argv)
 	barrier_init(&barrier, nb_threads + 1);
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+    /////////////////////////////////////////////////////////// Sanity Check //////////////////////////////////////////////////////////
+//    for (i = 0; i < 4; i++) {
+//        printf("Creating thread %d\n", i);
+//        data[i].first = i; // used for LSB
+//        data[i].range = range;
+//        data[i].update = update;
+//        data[i].unit_tx = unit_tx;
+//        data[i].alternate = alternate;
+//        data[i].effective = effective;
+//        data[i].nb_add = 0;
+//        data[i].nb_added = 0;
+//        data[i].nb_remove = 0;
+//        data[i].nb_removed = 0;
+//        data[i].nb_contains = 0;
+//        data[i].nb_found = 0;
+//        data[i].nb_aborts = 0;
+//        data[i].nb_aborts_locked_read = 0;
+//        data[i].nb_aborts_locked_write = 0;
+//        data[i].nb_aborts_validate_read = 0;
+//        data[i].nb_aborts_validate_write = 0;
+//        data[i].nb_aborts_validate_commit = 0;
+//        data[i].nb_aborts_invalid_memory = 0;
+//        data[i].nb_aborts_double_write = 0;
+//        data[i].max_retries = 0;
+//        data[i].seed = rand();
+//        data[i].set = set;
+//        data[i].barrier = &barrier;
+//        data[i].failures_because_contention = 0;
+//        if (pthread_create(&threads[i], &attr, sanity_test, (void *)(&data[i])) != 0) {
+//            fprintf(stderr, "Error creating thread\n");
+//            exit(1);
+//        }
+//    }
+//    pthread_attr_destroy(&attr);
+//    // Catch some signals
+//    if (signal(SIGHUP, catcher) == SIG_ERR ||
+//        //signal(SIGINT, catcher) == SIG_ERR ||
+//        signal(SIGTERM, catcher) == SIG_ERR) {
+//        perror("signal");
+//        exit(1);
+//    }
+//    // Start threads
+//    barrier_cross(&barrier);
+//
+//    for (i = 0; i < 4; i++) {
+//        if (pthread_join(threads[i], NULL) != 0) {
+//            fprintf(stderr, "Error waiting for thread completion\n");
+//            exit(1);
+//        }
+//        printf("thread %d finished successfully \n", i);
+//    }
+//
+//    bg_stop();
+//    bg_print_stats();
+//
+//    /*sl_set_print(set, 1);*/
+//    gc_subsystem_destroy();
+//
+//    // Delete set
+//    set_delete(set);
+//
+//    // Cleanup STM
+//    TM_SHUTDOWN();
+//
+//#ifndef TLS
+//    pthread_key_delete(rng_seed_key);
+//#endif /* ! TLS */
+//
+//    free(threads);
+//    free(data);
+//
+//    return 0;
+    /////////////////////////////////////////////////////////// Sanity Check ///////////////////////////////////////////////////////////
+
 	for (i = 0; i < nb_threads; i++) {
 		printf("Creating thread %d\n", i);
 		data[i].first = last;
