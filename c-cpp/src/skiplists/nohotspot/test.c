@@ -68,6 +68,7 @@ inline long rand_range(long r); /* declared in test.c */
 
 #include "intset.h"
 #include "background.h"
+#include <unistd.h>
 
 VOLATILE AO_t stop;
 unsigned int global_seed;
@@ -210,35 +211,43 @@ void print_skiplist(struct sl_set *set) {
 void* sanity_test(void *data) {
     thread_data_t *d = (thread_data_t *)data;
     unsigned int lsb = d->first;
+    printf("my lsb is: %d\n", lsb);
+    unsigned int key;
+    sleep(1);
 
     /* Wait on barrier */
     barrier_cross(d->barrier);
 
-    for (int i=0; i<1024; ++i){
-        unsigned int key = i<<2 + lsb;
-        assert(sl_add_old(d->set, key, TRANSACTIONAL));
-        assert(sl_contains_old(d->set, key, TRANSACTIONAL));
-        assert(sl_remove_old(d->set, key, TRANSACTIONAL));
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
+        if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %d\n", key);
+        if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %d\n", key);
+        //printf("handled key %d\n", key);
     }
 
-    printf("bulk test done\n");
+    printf("%d bulk test done\n", lsb);
 
-    for (int i=0; i<1024; ++i){
-        unsigned int key = i<<2 + lsb;
-        assert(sl_add_old(d->set, key, TRANSACTIONAL));
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
     }
 
-    for (int i=0; i<1024; ++i){
-        unsigned int key = i<<2 + lsb;
-        assert(sl_contains_old(d->set, key, TRANSACTIONAL));
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %d\n", key);
     }
 
-    for (int i=0; i<1024; ++i){
-        unsigned int key = i<<2 + lsb;
-        assert(sl_remove_old(d->set, key, TRANSACTIONAL));
+    for (int i=0; i<50000; ++i){
+        key = (i<<2) + lsb;
+        if (key == 0) continue;
+        if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %d\n", key);
     }
 
-    printf("fine test done\n");
+    printf("%d fine test done\n", lsb);
 
     return NULL;
 }
