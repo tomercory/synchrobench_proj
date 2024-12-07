@@ -82,7 +82,8 @@ sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional, ptst_t
 	
     node = gc_alloc(ptst, gc_id[0]);
     node->next = gc_alloc(ptst, gc_id[1]);
-	node->val = val;
+    node->next_val = gc_alloc(ptst, gc_id[1]); // Allocate memory for next_val
+    node->val = val;
 	node->toplevel = toplevel;
 	node->marked = 0;
 	node->fullylinked = 0;
@@ -98,18 +99,21 @@ sl_node_t *sl_new_node(val_t val, sl_node_t *next, int toplevel, int transaction
 {
 	sl_node_t *node;
 	int i;
-	
+
 	node = sl_new_simple_node(val, toplevel, transactional, ptst);
-	
-	for (i = 0; i < toplevel; i++)
-		node->next[i] = next;
-	
+
+	for (i = 0; i < toplevel; i++) {
+        node->next[i] = next;
+        node->next_val[i] = (next != NULL) ? next->val : VAL_MAX;
+    }
+
 	return node;
 }
 
 void sl_delete_node(sl_node_t *n, ptst_t *ptst)
 {
 	DESTROY_LOCK(&n->lock);
+    gc_free(ptst, (void*)n->next_val, gc_id[1]); // Free next_val
     gc_free(ptst, (void*)n->next, gc_id[1]);
     gc_free(ptst, (void*)n, gc_id[0]);
 }

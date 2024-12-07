@@ -89,12 +89,13 @@ typedef pthread_spinlock_t ptlock_t;
 #endif
 
 typedef struct sl_node {
-	val_t val; 
+	val_t val;
 	int toplevel;
 	struct sl_node** next;
-	volatile int marked;
+    val_t* next_val;               // Array of values of next nodes at each level
+    volatile int marked;
 	volatile int fullylinked;
-	ptlock_t lock;	
+	ptlock_t lock;
 } sl_node_t;
 
 typedef struct sl_intset {
