@@ -88,14 +88,18 @@ typedef pthread_spinlock_t ptlock_t;
 #  define UNLOCK(lock)			pthread_spin_unlock(lock)
 #endif
 
+typedef struct sl_next_entry {
+    struct sl_node* next;  // Pointer to the next node at this level
+    val_t next_val;        // Value of the next node at this level
+} sl_next_entry_t;
+
 typedef struct sl_node {
-	val_t val;
-	int toplevel;
-	struct sl_node** next;
-    val_t* next_val;               // Array of values of next nodes at each level
-    volatile int marked;
-	volatile int fullylinked;
-	ptlock_t lock;
+    val_t val;                 // Value of this node
+    int toplevel;              // Number of levels this node spans
+    sl_next_entry_t* next_arr; // Pointer to an array of `sl_next_entry_t`
+    volatile int marked;       // Marked for deletion
+    volatile int fullylinked;  // Fully linked in the list
+    ptlock_t lock;             // Lock for synchronization
 } sl_node_t;
 
 typedef struct sl_intset {

@@ -78,17 +78,29 @@ int floor_log_2(unsigned int n) {
  */
 sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional, ptst_t *ptst)
 {
-	sl_node_t *node;
-	
+    int i;
+    sl_node_t *node;
+
+    // Allocate memory for the node
     node = gc_alloc(ptst, gc_id[0]);
-    node->next = gc_alloc(ptst, gc_id[1]);
-    node->next_val = gc_alloc(ptst, gc_id[1]); // Allocate memory for next_val
+
+    // Allocate memory for the array of sl_next_entry_t
+    node->next_arr = gc_alloc(ptst, gc_id[1]);
+
+    // Initialize node fields
     node->val = val;
-	node->toplevel = toplevel;
-	node->marked = 0;
-	node->fullylinked = 0;
-	INIT_LOCK(&node->lock);
-	return node;
+    node->toplevel = toplevel;
+    node->marked = 0;
+    node->fullylinked = 0;
+    INIT_LOCK(&node->lock);
+
+    // Initialize each level in next_arr
+    for (i = 0; i < toplevel; i++) {
+        node->next_arr[i].next = NULL; // Initialize next pointers to NULL
+        node->next_arr[i].next_val = VAL_MAX; // Initialize next_val to a sentinel value
+    }
+
+    return node;
 }
 
 /* 
@@ -97,25 +109,31 @@ sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional, ptst_t
  */
 sl_node_t *sl_new_node(val_t val, sl_node_t *next, int toplevel, int transactional, ptst_t *ptst)
 {
-	sl_node_t *node;
-	int i;
+    sl_node_t *node;
+    int i;
 
-	node = sl_new_simple_node(val, toplevel, transactional, ptst);
+    // Create a new simple node with initialized fields
+    node = sl_new_simple_node(val, toplevel, transactional, ptst);
 
-	for (i = 0; i < toplevel; i++) {
-        node->next[i] = next;
-        node->next_val[i] = (next != NULL) ? next->val : VAL_MAX;
+    // Initialize each level in the `next_arr` structure
+    for (i = 0; i < toplevel; i++) {
+        node->next_arr[i].next = next;  // Set next pointer
+        node->next_arr[i].next_val = (next != NULL) ? next->val : VAL_MAX;  // Set next_val
     }
 
-	return node;
+    return node;
 }
 
 void sl_delete_node(sl_node_t *n, ptst_t *ptst)
 {
-	DESTROY_LOCK(&n->lock);
-    gc_free(ptst, (void*)n->next_val, gc_id[1]); // Free next_val
-    gc_free(ptst, (void*)n->next, gc_id[1]);
-    gc_free(ptst, (void*)n, gc_id[0]);
+    // Destroy the lock associated with the node
+    DESTROY_LOCK(&n->lock);
+
+    // Free the memory allocated for the `next_arr` array
+    gc_free(ptst, (void *)n->next_arr, gc_id[1]);
+
+    // Free the node itself
+    gc_free(ptst, (void *)n, gc_id[0]);
 }
 
 sl_intset_t *sl_set_new(ptst_t *ptst)
@@ -134,31 +152,39 @@ sl_intset_t *sl_set_new(ptst_t *ptst)
 
 void sl_set_delete(sl_intset_t *set, ptst_t *ptst)
 {
-	sl_node_t *node, *next;
-	
-	node = set->head;
-	while (node != NULL) {
-		next = node->next[0];
-		sl_delete_node(node, ptst);
-		node = next;
-	}
-	free(set);
+    sl_node_t *node, *next;
+
+    node = set->head;
+    while (node != NULL) {
+        // Access the next node from the first level of `next_arr`
+        next = node->next_arr[0].next;
+
+        // Delete the current node
+        sl_delete_node(node, ptst);
+
+        // Move to the next node
+        node = next;
+    }
+
+    // Free the memory allocated for the set structure
+    free(set);
 }
 
 int sl_set_size(sl_intset_t *set)
 {
-	int size = -1;
-	sl_node_t *node;
-	
-	/* We have at least 2 elements */
-	node = set->head->next[0];
-	while (node->next[0] != NULL) {
-		if (node->fullylinked && !node->marked)
-			size++;
-		node = node->next[0];
-	}
-	
-	return size;
+    int size = 0;
+    sl_node_t *node;
+
+    /* We have at least 2 elements */
+    node = set->head->next_arr[0].next; // Access the first node via next_arr
+    while (node->next_arr[0].next != NULL) { // Traverse using next_arr at level 0
+        if (node->fullylinked && !node->marked) {
+            size++;
+        }
+        node = node->next_arr[0].next; // Move to the next node
+    }
+
+    return size;
 }
 
 /**
@@ -166,6 +192,8 @@ int sl_set_size(sl_intset_t *set)
  */
 void set_subsystem_init(void)
 {
-        gc_id[0]  = gc_add_allocator(sizeof(sl_node_t));
-        gc_id[1]  = gc_add_allocator(levelmax * sizeof(sl_node_t *));
+    gc_id[0] = gc_add_allocator(sizeof(sl_node_t));
+
+    // Allocate memory for the array of pointers to the `next_arr` structs
+    gc_id[1] = gc_add_allocator(levelmax * sizeof(sl_next_entry_t));
 }

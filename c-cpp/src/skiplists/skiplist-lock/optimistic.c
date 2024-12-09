@@ -39,25 +39,26 @@ inline int ok_to_delete(sl_node_t *node, int found) {
  * original paper. A fast parameter has been added to speed-up the search 
  * so that the function quits as soon as the searched element is found.
  */
-inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast) {
-  int found, i;
-  sl_node_t *curr;
-	
-  found = -1;
-  curr = set->head;
+inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast)
+{
+    int found, i;
+    sl_node_t *curr;
 
-  for (i = (curr->toplevel - 1); i >= 0; i--) {
-    while (val > curr->next_val[i]) {
-      curr = curr->next[i];
+    found = -1;
+    curr = set->head;
+
+    for (i = (curr->toplevel - 1); i >= 0; i--) {
+        while (val > curr->next_arr[i].next_val) {
+            curr = curr->next_arr[i].next;
+        }
+        if (preds != NULL)
+            preds[i] = curr;
+        succs[i] = curr->next_arr[i].next;
+        if (found == -1 && val == curr->next_arr[i].next_val) {
+            found = i;
+        }
     }
-    if (preds != NULL) 
-      preds[i] = curr;
-    succs[i] = curr->next[i];
-    if (found == -1 && val == curr->next_val[i]) {
-      found = i;
-    }
-  }
-  return found;
+    return found;
 }
 
 /*
@@ -133,7 +134,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
       }
 
       valid = (!pred->marked && !succ->marked &&
-	       ((volatile sl_node_t*) pred->next[i] ==
+	       ((volatile sl_node_t*) pred->next_arr[i].next ==
 		(volatile sl_node_t*) succ));
     }
     if (!valid) {
@@ -151,12 +152,13 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     ptst_t *ptst = ptst_critical_enter();
     new_node = sl_new_simple_node(val, toplevel, 2, ptst);
     ptst_critical_exit(ptst);
-    for (i = 0; i < toplevel; i++) {
-      new_node->next[i] = succs[i];
-      new_node->next_val[i] = (succs[i] != NULL) ? succs[i]->val : VAL_MAX;
-      preds[i]->next[i] = new_node;
-      preds[i]->next_val[i] = new_node->val;
-    }
+      for (i = 0; i < toplevel; i++) {
+          new_node->next_arr[i].next = succs[i];
+          new_node->next_arr[i].next_val = (succs[i] != NULL) ? succs[i]->val : VAL_MAX;
+
+          preds[i]->next_arr[i].next = new_node;
+          preds[i]->next_arr[i].next_val = new_node->val;
+      }
 
     new_node->fullylinked = 1;
     unlock_levels(preds, highest_locked, 12);
@@ -217,7 +219,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 	  highest_locked = i;
 	  prev_pred = pred;
 	}
-	valid = (!pred->marked && ((volatile sl_node_t*) pred->next[i] == 
+	valid = (!pred->marked && ((volatile sl_node_t*) pred->next_arr[i].next ==
 				   (volatile sl_node_t*)succ));
       }
       if (!valid) {	
@@ -232,8 +234,8 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
       }
 			
       for (i = (toplevel-1); i >= 0; i--) {
-          preds[i]->next[i] = node_todel->next[i];
-          preds[i]->next_val[i] = node_todel->next_val[i];
+          preds[i]->next_arr[i].next = node_todel->next_arr[i].next;
+          preds[i]->next_arr[i].next_val = node_todel->next_arr[i].next_val;
       }
       UNLOCK(&node_todel->lock);
       unlock_levels(preds, highest_locked, 22);
