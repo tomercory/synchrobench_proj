@@ -21,7 +21,7 @@
  * GNU General Public License for more details.
  */
 
-#include "fraser.h"
+#include "skiplist.h"
 
 int sl_contains(sl_intset_t *set, val_t val, int transactional);
 int sl_add(sl_intset_t *set, val_t val, int transactional);
