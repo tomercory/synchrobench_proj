@@ -42,8 +42,7 @@ int sl_contains(sl_intset_t *set, val_t val, int transactional)
 			next = node->next[i];
 		}
 	}
-	node = node->next[0];
-	result = (node->val == val);
+	result = (node->next[0]->val == val);
 		
 #elif defined STM
 	
@@ -103,8 +102,7 @@ inline int sl_seq_add(sl_intset_t *set, val_t val) {
 		preds[i] = node;
 		succs[i] = node->next[i];
 	}
-	node = node->next[0];
-	if ((result = (node->val != val)) == 1) {
+	if ((result = (node->next[0]->val != val)) == 1) {
 		l = get_rand_level();
 		node = sl_new_simple_node(val, l, 0);
 		for (i = 0; i < l; i++) {
