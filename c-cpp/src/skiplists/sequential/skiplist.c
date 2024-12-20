@@ -69,9 +69,9 @@ sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional)
   sl_node_t *node;
 
   if (transactional)
-    node = (sl_node_t *)MALLOC(sizeof(sl_node_t) + toplevel * sizeof(sl_node_t *));
+    node = (sl_node_t *)MALLOC(sizeof(sl_node_t) + toplevel * sizeof(sl_next_entry_t));
   else 
-    node = (sl_node_t *)malloc(sizeof(sl_node_t) + toplevel * sizeof(sl_node_t *));
+    node = (sl_node_t *)malloc(sizeof(sl_node_t) + toplevel * sizeof(sl_next_entry_t));
   if (node == NULL) {
     perror("malloc");
     exit(1);
@@ -95,8 +95,9 @@ sl_node_t *sl_new_node(val_t val, sl_node_t *next, int toplevel, int transaction
 
   node = sl_new_simple_node(val, toplevel, transactional);
 
+  sl_next_entry_t next_entry = { .next = next, .next_val = (next != NULL ? next->val : VAL_MAX) };
   for (i = 0; i < levelmax; i++)
-    node->next[i] = next;
+    node->next_arr[i] = next_entry;
 	
   return node;
 }
@@ -127,7 +128,7 @@ void sl_set_delete(sl_intset_t *set)
 
   node = set->head;
   while (node != NULL) {
-    next = node->next[0];
+    next = node->next_arr[0].next;
     sl_delete_node(node);
     node = next;
   }
@@ -139,11 +140,11 @@ unsigned long sl_set_size(sl_intset_t *set)
   unsigned long size = 0;
   sl_node_t *node;
 
-  node = set->head->next[0];
-  while (node->next[0] != NULL) {
+  node = set->head->next_arr[0].next;
+  while (node->next_arr[0].next != NULL) {
     if (!node->deleted)
       size++;
-    node = node->next[0];
+    node = node->next_arr[0].next;
   }
 
   return size;

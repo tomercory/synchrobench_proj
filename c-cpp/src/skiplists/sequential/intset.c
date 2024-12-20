@@ -36,53 +36,18 @@ int sl_contains(sl_intset_t *set, val_t val, int transactional)
 	
 	node = set->head;
 	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next[i];
-		while (next->val < val) {
+		next = node->next_arr[i].next;
+		while (node->next_arr[i].next_val < val) {
 			node = next;
-			next = node->next[i];
+			next = node->next_arr[i].next;
 		}
 	}
-	node = node->next[0];
-	result = (node->val == val);
+    result = (node->next_arr[0].next_val == val);
 		
 #elif defined STM
-	
-	int i;
-	sl_node_t *node, *next;
-	val_t v = VAL_MIN;
 
-	if (transactional > 1) {
-	
-	  TX_START(EL);
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	  }
-	  node = (sl_node_t *)TX_LOAD(&node->next[0]);
-	  result = (v == val);
-	  TX_END;
+    // not supported
 
-	} else {
-
-	  TX_START(NL);
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	  }
-	  node = (sl_node_t *)TX_LOAD(&node->next[0]);
-	  result = (v == val);
-	  TX_END;
-
-	}
-	
 #endif
 	
 	return result;
@@ -95,21 +60,20 @@ inline int sl_seq_add(sl_intset_t *set, val_t val) {
 	
 	node = set->head;
 	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next[i];
-		while (next->val < val) {
+		next = node->next_arr[i].next;
+		while (node->next_arr[i].next_val < val) {
 			node = next;
-			next = node->next[i];
+			next = node->next_arr[i].next;
 		}
 		preds[i] = node;
-		succs[i] = node->next[i];
+		succs[i] = node->next_arr[i].next;
 	}
-	node = node->next[0];
-	if ((result = (node->val != val)) == 1) {
+	if ((result = (node->next_arr[0].next_val != val)) == 1) {
 		l = get_rand_level();
 		node = sl_new_simple_node(val, l, 0);
 		for (i = 0; i < l; i++) {
-			node->next[i] = succs[i];
-			preds[i]->next[i] = node;
+            node->next_arr[i] = (sl_next_entry_t){ .next = succs[i], .next_val = succs[i]->val };
+            preds[i]->next_arr[i] = (sl_next_entry_t){ .next = node, .next_val = node->val };
 		}
 	}
 	return result;
@@ -130,59 +94,8 @@ int sl_add(sl_intset_t *set, val_t val, int transactional)
 	result = sl_seq_add(set, val);
 		
 #elif defined STM
-	
-	int i, l;
-	sl_node_t *node, *next;
-	sl_node_t *preds[MAXLEVEL];
-	val_t v;  
-	
-	if (transactional > 2) {
 
-	  TX_START(EL);
-	  v = VAL_MIN;
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	    preds[i] = node;
-	  }
-	  if ((result = (v != val)) == 1) {
-	    l = get_rand_level();
-	    node = sl_new_simple_node(val, l, transactional);
-	    for (i = 0; i < l; i++) {
-	      node->next[i] = (sl_node_t *)TX_LOAD(&preds[i]->next[i]);	
-	      TX_STORE(&preds[i]->next[i], node);
-	    }
-	  }
-	  TX_END;
-
-	} else {
-
-	  TX_START(NL);
-	  v = VAL_MIN;
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	    preds[i] = node;
-	  }
-	  if ((result = (v != val)) == 1) {
-	    l = get_rand_level();
-	    node = sl_new_simple_node(val, l, transactional);
-	    for (i = 0; i < l; i++) {
-	      node->next[i] = (sl_node_t *)TX_LOAD(&preds[i]->next[i]);	
-	      TX_STORE(&preds[i]->next[i], node);
-	    }
-	  }
-	  TX_END;
-	
-	}
+      // not supported
 	
 #endif
 		
@@ -203,77 +116,24 @@ int sl_remove(sl_intset_t *set, val_t val, int transactional)
 	
 	node = set->head;
 	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next[i];
-		while (next->val < val) {
+		next = node->next_arr[i].next;
+		while (node->next_arr[i].next_val < val) {
 			node = next;
-			next = node->next[i];
+			next = node->next_arr[i].next;
 		}
 		preds[i] = node;
-		succs[i] = node->next[i];
+		succs[i] = node->next_arr[i].next;
 	}
 	if ((result = (next->val == val)) == 1) {
 		for (i = 0; i < set->head->toplevel; i++) 
 			if (succs[i]->val == val)
-				preds[i]->next[i] = succs[i]->next[i];
+				preds[i]->next_arr[i] = succs[i]->next_arr[i];
 		sl_delete_node(next); 
 	}
 
 #elif defined STM
 	
-	int i;
-	sl_node_t *node, *next = NULL;
-	sl_node_t *preds[MAXLEVEL], *succs[MAXLEVEL];
-	val_t v;  
-	
-	if (transactional > 3) {
-
-	  TX_START(EL);
-	  v = VAL_MIN;
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	    preds[i] = node;
-	    succs[i] = next;
-	  }
-	  if ((result = (next->val == val))) {
-	    for (i = 0; i < set->head->toplevel; i++) {
-	      if (succs[i]->val == val) {
-		TX_STORE(&preds[i]->next[i], (sl_node_t *)TX_LOAD(&succs[i]->next[i])); 
-	      }
-	    }
-	    FREE(next, sizeof(sl_node_t) + next->toplevel * sizeof(sl_node_t *));
-	  }
-	  TX_END;
-
-	} else {
-
-	  TX_START(NL);
-	  v = VAL_MIN;
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	    preds[i] = node;
-	    succs[i] = next;
-	  }
-	  if ((result = (next->val == val))) {
-	    for (i = 0; i < set->head->toplevel; i++) {
-	      if (succs[i]->val == val) {
-		TX_STORE(&preds[i]->next[i], (sl_node_t *)TX_LOAD(&succs[i]->next[i])); 
-	      }
-	    }
-	    FREE(next, sizeof(sl_node_t) + next->toplevel * sizeof(sl_node_t *));
-	  }
-	  TX_END;
-
-	}
+	// not supported
 	
 #endif
 	

@@ -21,7 +21,10 @@
  * GNU General Public License for more details.
  */
 
-#include "fraser.h"
+// While "fraser.h" includes additional functionality, it is never used in this context.
+// We include "skiplist.h" directly to avoid any confusion, ensuring it is clear that our changes
+// do not depend on or support the unused functionality in "fraser.h".
+#include "skiplist.h"
 
 int sl_contains(sl_intset_t *set, val_t val, int transactional);
 int sl_add(sl_intset_t *set, val_t val, int transactional);

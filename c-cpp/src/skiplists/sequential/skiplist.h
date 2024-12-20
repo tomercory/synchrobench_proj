@@ -68,11 +68,16 @@ typedef intptr_t level_t;
 #define VAL_MIN                         INT_MIN
 #define VAL_MAX                         INT_MAX
 
+typedef struct sl_next_entry {
+  struct sl_node *next;  // Pointer to the next node at this level
+  val_t next_val;        // Value of the next node at this level
+} sl_next_entry_t;
+
 typedef struct sl_node {
   val_t val;
   intptr_t deleted;
   int toplevel;
-  struct sl_node *next[1];
+  sl_next_entry_t next_arr[]; // Array of `next` pointers and their corresponding `next_val` values
 } sl_node_t;
 
 typedef struct sl_intset {
