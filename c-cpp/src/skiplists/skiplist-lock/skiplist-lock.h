@@ -70,9 +70,9 @@ extern unsigned int levelmax;
 
 #define TRANSACTIONAL                   d->unit_tx
 
-typedef intptr_t val_t;
-#define VAL_MIN                         INT_MIN
-#define VAL_MAX                         INT_MAX
+typedef unsigned long val_t;
+#define VAL_MIN                         (0UL)
+#define VAL_MAX                         (~0UL) /* Key value of last dummy node.  */
 
 #ifdef MUTEX
 typedef pthread_mutex_t ptlock_t;
@@ -88,10 +88,15 @@ typedef pthread_spinlock_t ptlock_t;
 #  define UNLOCK(lock)			pthread_spin_unlock(lock)
 #endif
 
+typedef struct sl_next_entry {
+    struct sl_node* next;  // Pointer to the next node at this level
+    val_t next_val;        // Value of the next node at this level
+} __attribute__((aligned(16))) sl_next_entry_t;
+
 typedef struct sl_node {
 	val_t val; 
 	int toplevel;
-	struct sl_node** next;
+    sl_next_entry_t* next_arr; // Pointer to an array of `sl_next_entry_t`
 	volatile int marked;
 	volatile int fullylinked;
 	ptlock_t lock;	
