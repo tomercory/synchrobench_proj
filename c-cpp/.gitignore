@@ -6,3 +6,8 @@ test.tbl
 *swp
 core*
 output*
+.idea/c-cpp.iml
+.idea/deployment.xml
+.idea/modules.xml
+.idea/vcs.xml
+.idea/workspace.xml

@@ -47,12 +47,12 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
   pred = set->head;
 	
   for (i = (pred->toplevel - 1); i >= 0; i--) {
-    curr = pred->next[i];
-    while (val > curr->val) {
+    curr = pred->next_arr[i].next;
+    while (val > pred->next_arr[i].next_val) {
       pred = curr;
-      curr = pred->next[i];
+      curr = pred->next_arr[i].next;
     }
-    if (preds != NULL) 
+    if (preds != NULL)
       preds[i] = pred;
     succs[i] = curr;
     if (found == -1 && val == curr->val) {
@@ -135,7 +135,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
       }	
 			
       valid = (!pred->marked && !succ->marked && 
-	       ((volatile sl_node_t*) pred->next[i] == 
+	       ((volatile sl_node_t*) pred->next_arr[i].next ==
 		(volatile sl_node_t*) succ));
     }	
     if (!valid) {
@@ -154,8 +154,9 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     new_node = sl_new_simple_node(val, toplevel, 2, ptst);
     ptst_critical_exit(ptst);
     for (i = 0; i < toplevel; i++) {
-      new_node->next[i] = succs[i];
-      preds[i]->next[i] = new_node;
+      new_node->next_arr[i] = (sl_next_entry_t){ .next = succs[i], .next_val = succs[i]->val };
+      preds[i]->next_arr[i].next = new_node;
+      preds[i]->next_arr[i].next_val = new_node->val;
     }
 		
     new_node->fullylinked = 1;
@@ -217,7 +218,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 	  highest_locked = i;
 	  prev_pred = pred;
 	}
-	valid = (!pred->marked && ((volatile sl_node_t*) pred->next[i] == 
+	valid = (!pred->marked && ((volatile sl_node_t*) pred->next_arr[i].next ==
 				   (volatile sl_node_t*)succ));
       }
       if (!valid) {	
@@ -231,9 +232,11 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 	continue;
       }
 			
-      for (i = (toplevel-1); i >= 0; i--) 
-	preds[i]->next[i] = node_todel->next[i];
-      UNLOCK(&node_todel->lock);	
+      for (i = (toplevel-1); i >= 0; i--) {
+          preds[i]->next_arr[i].next_val = node_todel->next_arr[i].next_val;
+          preds[i]->next_arr[i].next = node_todel->next_arr[i].next;
+      }
+      UNLOCK(&node_todel->lock);
       unlock_levels(preds, highest_locked, 22);
       ptst_t *ptst = ptst_critical_enter();
       sl_delete_node(node_todel, ptst);
