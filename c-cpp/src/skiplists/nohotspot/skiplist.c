@@ -182,13 +182,17 @@ void set_print(set_t *set, int flag)
         inode_t *ihead  = set->top;
         inode_t *itemp  = set->top;
 
-        /* print the index items */
+        /* print the index items */ // make sure order is correct
         while (NULL != ihead) {
                 while (NULL != itemp) {
-                        printf("%lu ", itemp->node->key);
+                        //printf("%lu ", itemp->node->key);
+                        if(itemp->right.right_p!= NULL && itemp->node->key >= itemp->right.right_p->node->key){
+                            printf("Error: index node %lld precedes index node %lld\n"
+                                   , itemp->node->key, itemp->right.right_p->node->key);
+                        }
                         itemp = itemp->right.right_p;
                 }
-                printf("\n");
+                //printf("\n");
                 ihead = ihead->down;
                 itemp = ihead;
         }
