@@ -63,12 +63,18 @@
 #define VAL_MIN                         INT_MIN
 #define VAL_MAX                         INT_MAX
 
+#define  RAND_TEST_RANGE                8
+#define  LOG2NUMTHREADS                 7
+#define  TEST_INSERTIONS                1000000
+
 int floor_log_2(unsigned int n);
 
 inline long rand_range(long r); /* declared in test.c */
 
 #include "intset.h"
 #include "background.h"
+#include <unistd.h>
+#include <stdbool.h>
 
 VOLATILE AO_t stop;
 unsigned int global_seed;
@@ -268,6 +274,30 @@ void* sanity_test(void *data) {
         if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
     }
 
+    return NULL;
+}
+
+void* tougher_sanity_test(void *data) {
+    thread_data_t *d = (thread_data_t *)data;
+    unsigned int lsb = d->first;
+    printf("my lsb is: %d\n", lsb);
+    unsigned int key;
+    sleep(1);
+    /* Wait on barrier */
+    barrier_cross(d->barrier);
+    for (int i=0; i<TEST_INSERTIONS; ++i){
+        key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
+        if (key == 0) continue;
+        if (!sl_contains_old(d->set, key, TRANSACTIONAL)){
+            if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
+            if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %d\n", key);
+            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %d\n", key);
+                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains removed key %d\n", key);
+            }
+        }
+    }
+    printf("Thread %d local test done\n", lsb);
     return NULL;
 }
 
@@ -620,7 +650,8 @@ int main(int argc, char **argv)
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
     /////////////////////////////////////////////////////////// Sanity Check //////////////////////////////////////////////////////////
-    for (i = 0; i < 4; i++) {
+    bool tough = true; // change to false if required
+    for (i = 0; i < nb_threads; i++) {
         printf("Creating thread %d\n", i);
         data[i].first = i; // used for LSB
         data[i].range = range;
@@ -647,7 +678,7 @@ int main(int argc, char **argv)
         data[i].set = set;
         data[i].barrier = &barrier;
         data[i].failures_because_contention = 0;
-        if (pthread_create(&threads[i], &attr, sanity_test, (void *)(&data[i])) != 0) {
+        if (pthread_create(&threads[i], &attr, (tough ? tougher_sanity_test : sanity_test), (void *)(&data[i])) != 0) {
             fprintf(stderr, "Error creating thread\n");
             exit(1);
         }
@@ -663,20 +694,17 @@ int main(int argc, char **argv)
     // Start threads
     barrier_cross(&barrier);
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < nb_threads; i++) {
         if (pthread_join(threads[i], NULL) != 0) {
             fprintf(stderr, "Error waiting for thread completion\n");
             exit(1);
         }
-        printf("thread %d finished successfully \n", i);
     }
 
     bg_stop();
     bg_print_stats();
 
-    set_print(set, 1); // make sure item order makes sense
-
-    /*sl_set_print(set, 1);*/
+    set_print(set, 1);
     gc_subsystem_destroy();
 
     // Delete set
