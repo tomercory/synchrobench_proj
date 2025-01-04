@@ -201,6 +201,7 @@ int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val)
         inode_t *item = NULL, *next_item = NULL;
         node_t *node = NULL, *next = NULL;
         val_t node_val = NULL, *next_val = NULL;
+        sl_key_t next_key;
         int result = 0;
         ptst_t *ptst;
 
@@ -212,18 +213,46 @@ int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val)
 
         /* find an entry-point to the node-level */
         item = set->top;
+        // this bug-fix does not work for some reason:
+//        while (1) {
+//                next_item = item->right.right_p;
+//                next_key = item->right.right_k;
+//                if (next_item != item->right.right_p) continue;
+//
+//                if (NULL == next_item || next_key > key) {
+//                        next_item = item->down;
+//                        if (NULL == next_item) {
+//                                node = item->node;
+//                                break;
+//                        }
+//                } else if (next_key == key) {
+//                        node = item->node;
+//                        break;
+//                }
+//                item = next_item;
+//        }
+        // this bug-fix does:
         while (1) {
-                next_item = item->right.right_p;
-                if (NULL == next_item || item->right.right_k > key) {
-                        next_item = item->down;
-                        if (NULL == next_item) {
-                                node = item->node;
-                                break;
-                        }
-                } else if (item->right.right_k == key) {
-                        node = item->node;
-                        break;
+            next_item = item->right.right_p;
+            next_key = item->right.right_k;
+            if (NULL == next_item || next_key > key) {
+                next_item = item->down;
+                if (NULL == next_item) {
+                    node = item->node;
+                    break;
                 }
+                item = next_item;
+                continue;
+            } else if (next_key == key) {
+                if(next_item->node->key == key){
+                    node = item->node;
+                    break;
+                }
+            }
+
+            if (next_item->node->key > key)
+                item = item->down;
+            else
                 item = next_item;
         }
         /* find the correct node and next */

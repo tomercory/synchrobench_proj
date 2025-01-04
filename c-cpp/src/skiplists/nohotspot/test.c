@@ -289,11 +289,11 @@ void* tougher_sanity_test(void *data) {
         key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
         if (key == 0) continue;
         if (!sl_contains_old(d->set, key, TRANSACTIONAL)){
-            if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
-            if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %d\n", key);
+            if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %lu\n", key);
+            if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %lu\n", key);
             if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %d\n", key);
-                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains removed key %d\n", key);
+                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %lu\n", key);
+                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains removed key %lu\n", key);
             }
         }
     }
