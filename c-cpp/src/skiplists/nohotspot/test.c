@@ -62,6 +62,10 @@
 #define VAL_MIN                         INT_MIN
 #define VAL_MAX                         INT_MAX
 
+#define  RAND_TEST_RANGE                8
+#define  LOG2NUMTHREADS                 7
+#define  TEST_INSERTIONS                1000000
+
 int floor_log_2(unsigned int n);
 
 inline long rand_range(long r); /* declared in test.c */
@@ -69,6 +73,7 @@ inline long rand_range(long r); /* declared in test.c */
 #include "intset.h"
 #include "background.h"
 #include <unistd.h>
+#include <stdbool.h>
 
 VOLATILE AO_t stop;
 unsigned int global_seed;
@@ -207,7 +212,6 @@ void print_skiplist(struct sl_set *set) {
 		printf("%d nodes of level %d\n", arr[j], j);
 }
 
-
 void* sanity_test(void *data) {
     thread_data_t *d = (thread_data_t *)data;
     unsigned int lsb = d->first;
@@ -262,6 +266,151 @@ void* sanity_test(void *data) {
     }
 
     printf("%d fine test done\n", lsb);
+
+    return NULL;
+}
+
+void* tougher_sanity_test(void *data) {
+    thread_data_t *d = (thread_data_t *)data;
+    unsigned int lsb = d->first;
+    printf("my lsb is: %d\n", lsb);
+    unsigned int key;
+    sleep(1);
+
+    /* Wait on barrier */
+    barrier_cross(d->barrier);
+
+    for (int i=0; i<TEST_INSERTIONS; ++i){
+        key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
+        if (key == 0) continue;
+        if (!sl_contains_old(d->set, key, TRANSACTIONAL)){
+            if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %d\n", key);
+            if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %d\n", key);
+            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %d\n", key);
+                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains removed key %d\n", key);
+            }
+        }
+    }
+
+    printf("Thread %d local test done\n", lsb);
+    return NULL;
+}
+
+void *randomization_test(void *data) {
+    int unext, last = -1;
+    unsigned int val = 0;
+
+    // Initialize histograms, make sure their size fits the range used
+    int local_try_add_histo[RAND_TEST_RANGE] = {0};
+    int local_add_histo[RAND_TEST_RANGE] = {0};
+    int local_try_rem_histo[RAND_TEST_RANGE] = {0};
+    int local_rem_histo[RAND_TEST_RANGE] = {0};
+    int local_read_histo[RAND_TEST_RANGE] = {0};
+    int local_found_histo[RAND_TEST_RANGE] = {0};
+
+
+    thread_data_t *d = (thread_data_t *)data;
+
+    /* Create transaction */
+    TM_THREAD_ENTER();
+    /* Wait on barrier */
+    barrier_cross(d->barrier);
+
+    /* Is the first op an update? */
+    unext = (rand_range_re(&d->seed, 100) - 1 < d->update);
+
+#ifdef ICC
+    while (stop == 0) {
+#else
+    while (AO_load_full(&stop) == 0) {
+#endif
+
+        if (unext) { // update
+
+            if (last < 0) { // add
+
+                val = rand_range_re(&d->seed, d->range);
+                if (sl_add_old(d->set, val, TRANSACTIONAL)) {
+                    d->nb_added++;
+                    last = val;
+                }
+                d->nb_add++;
+
+            } else { // remove
+
+                if (d->alternate) { // alternate mode (default)
+                    if (sl_remove_old(d->set, last, TRANSACTIONAL)) {
+                        d->nb_removed++;
+                    }
+                    last = -1;
+                } else {
+                    /* Random computation only in non-alternated cases */
+                    val = rand_range_re(&d->seed, d->range);
+                    /* Remove one random value */
+                    if (sl_remove_old(d->set, val, TRANSACTIONAL)) {
+                        d->nb_removed++;
+                        /* Repeat until successful, to avoid size variations */
+                        last = -1;
+                    }
+                }
+                d->nb_remove++;
+            }
+
+        } else { // read
+
+            if (d->alternate) {
+                if (d->update == 0) {
+                    if (last < 0) {
+                        val = d->first;
+                        last = val;
+                    } else { // last >= 0
+                        val = rand_range_re(&d->seed, d->range);
+                        last = -1;
+                    }
+                } else { // update != 0
+                    if (last < 0) {
+                        val = rand_range_re(&d->seed, d->range);
+                        //last = val;
+                    } else {
+                        val = last;
+                    }
+                }
+            }	else val = rand_range_re(&d->seed, d->range);
+
+            if (sl_contains_old(d->set, val, TRANSACTIONAL)){
+                d->nb_found++;
+                local_found_histo[val-1]++;
+            }
+
+            local_read_histo[val-1]++;
+            d->nb_contains++;
+
+        }
+
+        /* Is the next op an update? */
+        if (d->effective) { // a failed remove/add is a read-only tx
+            unext = ((100 * (d->nb_added + d->nb_removed))
+                     < (d->update * (d->nb_add + d->nb_remove + d->nb_contains)));
+        } else { // remove/add (even failed) is considered as an update
+            unext = (rand_range_re(&d->seed, 100) - 1 < d->update);
+        }
+
+#ifdef ICC
+        }
+#else
+    }
+#endif /* ICC */
+
+    /* Free transaction */
+    TM_THREAD_EXIT();
+    // report contains:
+    int pid = getpid();
+    printf("Process %d finished.\n", pid);
+    for(int i=0; i<RAND_TEST_RANGE; ++i){
+        printf("Process %d performed %d reads of key %d. %d of those reads were successful.\n", pid, local_read_histo[i], i+1, local_found_histo[i]);
+    }
+
 
     return NULL;
 }
@@ -615,7 +764,8 @@ int main(int argc, char **argv)
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
     /////////////////////////////////////////////////////////// Sanity Check //////////////////////////////////////////////////////////
-    for (i = 0; i < 4; i++) {
+    bool tough = true; // change to false if required
+    for (i = 0; i < nb_threads; i++) {
         printf("Creating thread %d\n", i);
         data[i].first = i; // used for LSB
         data[i].range = range;
@@ -642,7 +792,7 @@ int main(int argc, char **argv)
         data[i].set = set;
         data[i].barrier = &barrier;
         data[i].failures_because_contention = 0;
-        if (pthread_create(&threads[i], &attr, sanity_test, (void *)(&data[i])) != 0) {
+        if (pthread_create(&threads[i], &attr, (tough ? tougher_sanity_test : sanity_test), (void *)(&data[i])) != 0) {
             fprintf(stderr, "Error creating thread\n");
             exit(1);
         }
@@ -658,7 +808,7 @@ int main(int argc, char **argv)
     // Start threads
     barrier_cross(&barrier);
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < nb_threads; i++) {
         if (pthread_join(threads[i], NULL) != 0) {
             fprintf(stderr, "Error waiting for thread completion\n");
             exit(1);
@@ -668,7 +818,7 @@ int main(int argc, char **argv)
     bg_stop();
     bg_print_stats();
 
-    /*sl_set_print(set, 1);*/
+    set_print(set, 1);
     gc_subsystem_destroy();
 
     // Delete set
@@ -719,6 +869,11 @@ int main(int argc, char **argv)
 			fprintf(stderr, "Error creating thread\n");
 			exit(1);
 		}
+        // Switch to this to check randomization
+//        if (pthread_create(&threads[i], &attr, randomization_test, (void *)(&data[i])) != 0) {
+//            fprintf(stderr, "Error creating thread\n");
+//            exit(1);
+//        }
 	}
 	pthread_attr_destroy(&attr);
 	

@@ -180,26 +180,53 @@ void set_print(set_t *set, int flag)
         node_t  *node   = set->head;
         inode_t *ihead  = set->top;
         inode_t *itemp  = set->top;
+        int index_levels = 0;
+        int num_nodes =0;
+        int num_elements =0;
 
-        /* print the index items */
+    /* print the index items */ // and make sure order is correct
         while (NULL != ihead) {
-                while (NULL != itemp) {
-                        printf("%lu ", itemp->node->key);
-                        itemp = itemp->right;
+            while (NULL != itemp) {
+                //printf("%lu ", itemp->node->key);
+                if(itemp->right != NULL && itemp->node->key > itemp->right->node->key){
+                    printf("Error: index node %lu precedes index node %lu\n"
+                            , itemp->node->key, itemp->right->node->key);
+                    if (itemp->right->right == NULL){
+                        printf("(Error was in last node)\n");
+                    }
                 }
-                printf("\n");
-                ihead = ihead->down;
-                itemp = ihead;
+                itemp = itemp->right;
+            }
+            //printf("\n");
+            ihead = ihead->down;
+            itemp = ihead;
+            ++index_levels;
         }
+        printf("There were %d index levels\n",index_levels);
 
-        while (NULL != node) {
-                if (flag && (NULL != node->val && node->val != node))
-                        printf("%lu ", node->key);
-                else if (!flag)
-                        printf("%lu ", node->key);
+        while (NULL != node) { // and make sure order is correct
+//                if (flag && (NULL != node->val && node->val != node))
+//                        printf("%lu ", node->key);
+//                else if (!flag)
+//                        printf("%lu ", node->key);
+
+                if(node->next != NULL && node->key > node->next->key){
+                    if (!((NULL == node->val || node->val == node)&&(NULL == node->next->val || node->next->val == node->next))) {
+                        printf("\nError: node %lu precedes node %lu\n", node->key, node->next->key);
+
+                        if (NULL == node->val || node->val == node) {
+                            printf("(Left erroneous node is deleted)\n");
+                        }
+                        if (NULL == node->next->val || node->next->val == node->next) {
+                            printf("(Right erroneous node is deleted)\n");
+                        }
+                    }
+                }
+                num_nodes++;
+                if(NULL != node->val && node->val != node) num_elements++;
                 node = node->next;
         }
-        printf("\n");
+        printf("There were %d nodes representing %d logical elements\n", num_nodes, num_elements);
 }
 
 /**
