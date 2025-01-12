@@ -68,6 +68,7 @@ reads from memory to occur.
 #include "garbagecoll.h"
 #include "ptst.h"
 #include "common.h"
+#include "SIMD_atomics.h"
 
 /* - Private variables - */
 
@@ -165,6 +166,10 @@ static void* bg_loop(void *args)
                         /* add a new index level */
                         kp_t new_top_right = {NULL, MAX_KEY};
                         inew = inode_new(new_top_right, set->top, set->head, ptst);
+//                        if (inew->right.right_p != NULL && inew->right.right_k != inew->right.right_p->node->key){ // debugging
+//                            printf("In inew #1, created a node with next_k = %lu when in reality, next->key = %lu."
+//                                    , inew->right.right_k, inew->right.right_k);
+//                        }
                         set->top = inew;
                         ++set->head->level;
                         assert(NULL == inodes[1]);
@@ -188,6 +193,10 @@ static void* bg_loop(void *args)
                         /* add a new index level */
                         kp_t new_top_right = {NULL, MAX_KEY};
                         inew = inode_new(new_top_right, set->top, set->head, ptst);
+//                        if (inew->right.right_p != NULL && inew->right.right_k != inew->right.right_p->node->key){ // debugging
+//                            printf("In inew #2, created a node with next_k = %lu when in reality, next->key = %lu."
+//                                    , inew->right.right_k, inew->right.right_k);
+//                        }
                         set->top = inew;
                         ++set->head->level;
 
@@ -289,8 +298,19 @@ static int bg_raise_nlevel(inode_t *inode, ptst_t *ptst)
                                 /* add a new index item above node */
                                 inew = inode_new(above_prev->right, NULL,
                                                  node, ptst);
+//                                if (inew->right.right_p != NULL && inew->right.right_k != inew->right.right_p->node->key){ // debugging
+//                                    printf("In inew #3, created a node with next_k = %lu when in reality, next->key = %lu."
+//                                            , inew->right.right_k, inew->right.right_k);
+//                                }
                                 above_prev->right.right_p = inew; // must update pointer first to maintain logical correctness
                                 above_prev->right.right_k = inew->node->key;
+                                // Alternative- write both fields atomically using SIMD operation
+//                                struct sl_kp local_kp = {inew, inew->node->key};
+//                                write_16_bytes_atomic((__m128i *) &(above_prev->right), (const __m128i *) &local_kp);
+//                                if (above_prev->right.right_k != above_prev->right.right_p->node->key){ // debugging
+//                                    printf("In bg_raise_nlevel, buggy write resulted in next_k = %lu when in reality, next->key = %lu."
+//                                           , above_prev->right.right_k, above_prev->right.right_k);
+//                                }
                                 node->level = 1;
                                 above_prev = inode = above = inew;
                         }
@@ -317,6 +337,7 @@ static int bg_raise_ilevel(inode_t *iprev, inode_t *iprev_tall,
 {
         int raised = 0;
         inode_t *index, *inext, *inew, *above, *above_prev;
+        // struct sl_kp local_kp_inext; // to be used with the SIMD approach
 
         above = above_prev = iprev_tall;
 
@@ -325,6 +346,55 @@ static int bg_raise_ilevel(inode_t *iprev, inode_t *iprev_tall,
 
         index = iprev->right.right_p;
 
+    // SIMD version
+//    while ((NULL != index) && (NULL != (local_kp_inext = index->right).right_p)) {
+//        while (index->node->val == index->node) {
+//            /* skip deleted nodes */
+//            write_16_bytes_atomic((__m128i *) &(iprev->right), (const __m128i *) &local_kp_inext);
+//            if (iprev->right.right_k != iprev->right.right_p->node->key){ // debugging
+//                printf("In bg_raise_ilevel (skip deleted), buggy write resulted in next_k = %lu when in reality, next->key = %lu."
+//                        , iprev->right.right_k, iprev->right.right_k);
+//            }
+//            if (NULL == local_kp_inext.right_p)
+//                break;
+//
+//            index = local_kp_inext.right_p;
+//            local_kp_inext = local_kp_inext.right_p->right;
+//        }
+//        if (NULL == local_kp_inext.right_p)
+//            break;
+//        if (((iprev->node->level <= height) &&
+//             (index->node->level <= height)) &&
+//            (local_kp_inext.right_p->node->level <= height)) {
+//
+//            raised = 1;
+//
+//            /* get the correct index above and behind */
+//            while (above && above->node->key < index->node->key) {
+//                above = above->right.right_p;
+//                if (above != iprev_tall->right.right_p)
+//                    above_prev = above_prev->right.right_p;
+//            }
+//
+//            inew = inode_new(above_prev->right, index,
+//                             index->node, ptst);
+//            if (inew->right.right_p != NULL && inew->right.right_k != inew->right.right_p->node->key){ // debugging
+//                printf("In inew #4, created a node with next_k = %lu when in reality, next->key = %lu."
+//                        , inew->right.right_k, inew->right.right_k);
+//            }
+//            struct sl_kp inew_kp = {inew, inew->node->key};
+//            write_16_bytes_atomic((__m128i *) &(above_prev->right), (const __m128i *) &inew_kp);
+//            if (above_prev->right.right_k != above_prev->right.right_p->node->key){ // debugging
+//                printf("In bg_raise_ilevel (raise), buggy write resulted in next_k = %lu when in reality, next->key = %lu."
+//                        ,above_prev->right.right_k, above_prev->right.right_k);
+//            }
+//            index->node->level = height + 1;
+//            above_prev = above = iprev_tall = inew;
+//        }
+//        iprev = index;
+//        index = local_kp_inext.right_p;
+//    }
+        // original version
         while ((NULL != index) && (NULL != (inext = index->right.right_p))) {
                 while (index->node->val == index->node) {
                         /* skip deleted nodes */
