@@ -42,7 +42,21 @@
 #include "portable_defns.h"
 #include "ptst.h"
 #include "set.h"
+#include "atomic_ops.h"
+#include <stdint.h>
+#include <emmintrin.h> // For SSE2 intrinsics
 
+#define WIDE_CAS(_a, _o1, _o2, _n1, _n2)                          \
+({                                                                \
+    char cas_result;                                              \
+    __asm__ __volatile__(                                         \
+        "lock; cmpxchg16b %0; setz %1"                            \
+        : "=m" (*(volatile AO_double_t *)(_a)), "=a" (cas_result) \
+        : "m" (*(volatile AO_double_t *)(_a)),                    \
+          "d" (_o2), "a" (_o1), "c" (_n2), "b" (_n1)              \
+        : "memory");                                              \
+    cas_result;                                                   \
+})
 
 /*
  * SKIP LIST
@@ -52,6 +66,11 @@ typedef struct node_st node_t;
 typedef struct set_st set_t;
 typedef VOLATILE node_t *sh_node_pt;
 
+typedef struct next_node_st {
+    sh_node_pt next_node;
+    setkey_t next_key;
+} next_pair_t __attribute__((aligned(16)));
+
 struct node_st
 {
     int        level;
@@ -59,7 +78,7 @@ struct node_st
 #define READY_FOR_FREE 0x100
     setkey_t  k;
     setval_t  v;
-    sh_node_pt next[1];
+    next_pair_t next_arr[1]; // Flexible array of next_pair_t structs (level size)
 };
 
 struct set_st
@@ -72,6 +91,17 @@ static int gc_id[NUM_LEVELS];
 /*
  * PRIVATE FUNCTIONS
  */
+
+static inline void atomic_read_next_pair(const next_pair_t *src, sh_node_pt *next_p, setkey_t *next_v) {
+    next_pair_t local_entry;
+
+    // Atomic read of 16 bytes
+    *(__m128i *)&local_entry = _mm_load_si128((const __m128i *)src);
+
+    // Extract fields
+    *next_p = local_entry.next_node;
+    *next_v = local_entry.next_key;
+}
 
 /*
  * Random level generator. Drop-off rate is 0.5 per level.
@@ -131,7 +161,7 @@ static sh_node_pt strong_search_predecessors(
     for ( i = NUM_LEVELS - 1; i >= 0; i-- )
     {
         /* We start our search at previous level's unmarked predecessor. */
-        READ_FIELD(x_next, x->next[i]);
+        READ_FIELD(x_next, x->next_arr[i].next_node);
         /* If this pointer's marked, so is @pa[i+1]. May as well retry. */
         if ( is_marked_ref(x_next) ) goto retry;
 
@@ -140,7 +170,7 @@ static sh_node_pt strong_search_predecessors(
             /* Shift over a sequence of marked nodes. */
             for ( ; ; )
             {
-                READ_FIELD(y_next, y->next[i]);
+                READ_FIELD(y_next, y->next_arr[i].next_node);
                 if ( !is_marked_ref(y_next) ) break;
                 y = get_unmarked_ref(y_next);
             }
@@ -156,8 +186,13 @@ static sh_node_pt strong_search_predecessors(
         /* Swing forward pointer over any marked nodes. */
         if ( x_next != y )
         {
-            old_x_next = CASPO(&x->next[i], x_next, y);
-            if ( old_x_next != x_next ) goto retry;
+            if (!WIDE_CAS(&x->next_arr[i],
+                          (AO_t)x_next,
+                          (AO_t)x->next_arr[i].next_key,
+                          (AO_t)y,
+                          (AO_t)y_k)) {
+                goto retry;
+            }
         }
 
         if ( pa ) pa[i] = x;
@@ -166,7 +201,6 @@ static sh_node_pt strong_search_predecessors(
 
     return(y);
 }
-
 
 /* This function does not remove marked nodes. Use it optimistically. */
 static sh_node_pt weak_search_predecessors(
@@ -181,10 +215,9 @@ static sh_node_pt weak_search_predecessors(
     {
         for ( ; ; )
         {
-            READ_FIELD(x_next, x->next[i]);
+            atomic_read_next_pair(&x->next_arr[i], &x_next, &x_next_k);
             x_next = get_unmarked_ref(x_next);
 
-            READ_FIELD(x_next_k, x_next->k);
             if ( x_next_k >= k ) break;
 
             x = x_next;
@@ -210,10 +243,11 @@ static void mark_deleted(sh_node_pt x, int level)
 
     while ( --level >= 0 )
     {
-        x_next = x->next[level];
+        x_next = x->next_arr[level].next_node;
         while ( !is_marked_ref(x_next) )
         {
-            x_next = CASPO(&x->next[level], x_next, get_marked_ref(x_next));
+            // note: WIDE CAS is not needed here since it's just a mark removal
+            x_next = CASPO(&x->next_arr[level].next_node, x_next, get_marked_ref(x_next));
         }
         WEAK_DEP_ORDER_WMB(); /* mark in order */
     }
@@ -244,10 +278,10 @@ static void do_full_delete(ptst_t *ptst, set_t *l, sh_node_pt x, int level)
     if ( i > 0 ) RMB();
     while ( i > 0 )
     {
-        node_t *n = get_unmarked_ref(preds[i]->next[i]);
+        node_t *n = get_unmarked_ref(preds[i]->next_arr[i].next_node);
         while ( n->k < k )
         {
-            n = get_unmarked_ref(n->next[i]);
+            n = get_unmarked_ref(n->next_arr[i].next_node);
             RMB(); /* we don't want refs to @x to "disappear" */
         }
         if ( n == x ) goto retry;
@@ -270,8 +304,8 @@ set_t *set_alloc(void)
     node_t *n;
     int i;
 
-    n = malloc(sizeof(*n) + (NUM_LEVELS-1)*sizeof(node_t *));
-    memset(n, 0, sizeof(*n) + (NUM_LEVELS-1)*sizeof(node_t *));
+    n = malloc(sizeof(*n) + (NUM_LEVELS-1)*sizeof(next_pair_t));
+    memset(n, 0, sizeof(*n) + (NUM_LEVELS-1)*sizeof(next_pair_t));
     n->k = SENTINEL_KEYMAX;
 
     /*
@@ -279,14 +313,19 @@ set_t *set_alloc(void)
      * otherwise READ_FIELD() will continually execute costly barriers.
      * Note use of 0xfe -- that doesn't look like a marked value!
      */
-    memset(n->next, 0xfe, NUM_LEVELS*sizeof(node_t *));
+    for ( i = 0; i < NUM_LEVELS; i++ )
+    {
+        n->next_arr[i].next_key = INVALID_FIELD;    // Set next_key to a special value (INVALID_FIELD)
+        n->next_arr[i].next_node = (node_t *)0xfe;  // Set next pointer to the same special value
+    }
 
-    l = malloc(sizeof(*l) + (NUM_LEVELS-1)*sizeof(node_t *));
+    l = malloc(sizeof(*l) + (NUM_LEVELS-1)*sizeof(next_pair_t));
     l->head.k = SENTINEL_KEYMIN;
     l->head.level = NUM_LEVELS;
     for ( i = 0; i < NUM_LEVELS; i++ )
     {
-        l->head.next[i] = n;
+        l->head.next_arr[i].next_node = n;
+        l->head.next_arr[i].next_key = SENTINEL_KEYMAX;
     }
 
     return(l);
@@ -300,6 +339,7 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
     sh_node_pt preds[NUM_LEVELS], succs[NUM_LEVELS];
     sh_node_pt pred, succ, new = NULL, new_next, old_next;
     int        i, level, result, retval;
+    setkey_t new_next_k;
 
     k = CALLER_TO_INTERNAL_KEY(k);
 
@@ -354,14 +394,17 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
     /* If successors don't change, this saves us some CAS operations. */
     for ( i = 0; i < level; i++ )
     {
-        new->next[i] = succs[i];
+        new->next_arr[i].next_node = succs[i];
+        new->next_arr[i].next_key = succs[i]->k;
     }
 
     /* We've committed when we've inserted at level 1. */
     WMB_NEAR_CAS(); /* make sure node fully initialised before inserting */
-    old_next = CASPO(&preds[0]->next[0], succ, new);
-    if ( old_next != succ )
-    {
+    if (!WIDE_CAS(&preds[0]->next_arr[0],
+                  (AO_t)succ,
+                  (AO_t)preds[0]->next_arr[0].next_key,
+                  (AO_t)new,
+                  (AO_t)k)) {
         succ = strong_search_predecessors(l, k, preds, succs);
         goto retry;
     }
@@ -374,14 +417,18 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
         succ = succs[i];
 
         /* Someone *can* delete @new under our feet! */
-        new_next = new->next[i];
+        new_next = new->next_arr[i].next_node;
         if ( is_marked_ref(new_next) ) goto success;
 
         /* Ensure forward pointer of new node is up to date. */
         if ( new_next != succ )
         {
-            old_next = CASPO(&new->next[i], new_next, succ);
-            if ( is_marked_ref(old_next) ) goto success;
+            WIDE_CAS(&new->next_arr[i],
+                     (AO_t)new_next,
+                     (AO_t)new->next_arr[i].next_key,
+                     (AO_t)succ,
+                     (AO_t)succ->k);
+            if ( is_marked_ref(new_next) ) goto success;
             assert(old_next == new_next);
         }
 
@@ -390,8 +437,11 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
         assert((pred->k < k) && (succ->k > k));
 
         /* Replumb predecessor's forward pointer. */
-        old_next = CASPO(&pred->next[i], succ, new);
-        if ( old_next != succ )
+        if (!WIDE_CAS(&pred->next_arr[i],
+                      (AO_t)succ,
+                      (AO_t)pred->next_arr[i].next_key,
+                      (AO_t)new,
+                      (AO_t)k))
         {
         new_world_view:
             RMB(); /* get up-to-date view of the world. */
@@ -457,7 +507,11 @@ int set_remove(set_t *l, setkey_t k)
      */
     for ( i = level - 1; i >= 0; i-- )
     {
-        if ( CASPO(&preds[i]->next[i], x, get_unmarked_ref(x->next[i])) != x )
+        if (!WIDE_CAS(&preds[i]->next_arr[i],
+                      (AO_t)x,
+                      (AO_t)preds[i]->next_arr[i].next_key,
+                      (AO_t)get_unmarked_ref(x->next_arr[i].next_node),
+                      (AO_t)x->next_arr[i].next_key))
         {
             if ( (i != (level - 1)) || check_for_full_delete(x) )
             {
@@ -500,6 +554,7 @@ int set_lookup(set_t *l, setkey_t k)
 void set_print(set_t *set)
 {
 	node_t *curr;
+    setkey_t prev_key;
 	int i, j;
         int level;
 	int arr[NUM_LEVELS];
@@ -509,16 +564,20 @@ void set_print(set_t *set)
 	curr = &set->head;
 	do {
 		level = curr->level & LEVEL_MASK;
-                printf("%lu", curr->k);
-		for (i=0; i< level; i++) {
-			printf("-*");
-		}
+//                printf("%lu", curr->k);
+        if (curr->k != SENTINEL_KEYMIN && prev_key > curr->k) {
+            printf("error!\n");
+        }
+//		for (i=0; i< level; i++) {
+//			printf("-*");
+//		}
 		arr[level-1]++;
-		printf("\n");
-		curr = curr->next[0];
+//		printf("\n");
+        prev_key = curr->k;
+		curr = curr->next_arr[0].next_node;
 	} while (SENTINEL_KEYMAX != curr->k);
-	for (j=0; j<NUM_LEVELS; j++)
-		printf("%d nodes of level %d\n", arr[j], j+1);
+//	for (j=0; j<NUM_LEVELS; j++)
+//		printf("%d nodes of level %d\n", arr[j], j+1);
 }
 
 unsigned long set_count(set_t *set)
@@ -529,7 +588,7 @@ unsigned long set_count(set_t *set)
 	curr = &set->head;
 	do {
 		if (curr->v != NULL && curr->v != curr) ++i;
-                curr = curr->next[0];
+                curr = curr->next_arr[0].next_node;
 	} while (SENTINEL_KEYMAX != curr->k);
 
         return i;
@@ -545,7 +604,7 @@ void set_print_nodenums(set_t *set)
         for ( ; level >= 0; level--) {
                 while (SENTINEL_KEYMAX != curr->k) {
                         ++count;
-                        curr = curr->next[level];
+                        curr = curr->next_arr[level].next_node;
                 }
                 printf("Nodes at level %d = %d\n", level-1, count);
                 count = 0;
@@ -559,7 +618,7 @@ void _init_set_subsystem(void)
 
     for ( i = 0; i < NUM_LEVELS; i++ )
     {
-        gc_id[i] = gc_add_allocator(sizeof(node_t) + i*sizeof(node_t *));
+        gc_id[i] = gc_add_allocator(sizeof(node_t) + i*sizeof(next_pair_t));
     }
 
     printf("_init_set_subsystem() done\n");

@@ -6,3 +6,8 @@ test.tbl
 *swp
 core*
 output*
+c-cpp.iml
+deployment.xml
+modules.xml
+vcs.xml
+workspace.xml

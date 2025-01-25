@@ -14,6 +14,7 @@ else
     ARCH = SPARC
 endif
 
+CFLAGS      += -I$(ROOT)/src/atomic_ops
 CFLAGS      += -D$(ARCH) -Wno-unused-value -Wno-format #-fomit-frame-pointer
 
 #CFLAGS      += $(DEBUGGING)
