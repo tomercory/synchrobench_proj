@@ -70,9 +70,9 @@ extern unsigned int levelmax;
 
 #define TRANSACTIONAL                   d->unit_tx
 
-typedef intptr_t val_t;
-#define VAL_MIN                         INT_MIN
-#define VAL_MAX                         INT_MAX
+typedef unsigned long val_t;
+#define VAL_MIN                         (0UL)
+#define VAL_MAX                         (~0UL) /* Key value of last dummy node.  */
 
 #ifdef MUTEX
 typedef pthread_mutex_t ptlock_t;
