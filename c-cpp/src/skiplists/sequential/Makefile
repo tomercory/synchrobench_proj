@@ -8,6 +8,7 @@ else
   BINS = $(BINDIR)/$(STM)-skiplist
 endif
 CFLAGS += -std=gnu89
+LDFLAGS += -lpfm  # Link libpfm
 
 .PHONY:	all clean
 
