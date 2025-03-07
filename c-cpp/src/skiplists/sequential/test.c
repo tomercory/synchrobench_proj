@@ -22,7 +22,12 @@
  */
 
 #include "intset.h"
-
+#include <perfmon/pfmlib.h>
+#include <perfmon/pfmlib_perf_event.h>
+//#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <string.h>
 volatile AO_t stop;
 unsigned int global_seed;
 #ifdef TLS
@@ -31,6 +36,33 @@ __thread unsigned int *rng_seed;
 pthread_key_t rng_seed_key;
 #endif /* ! TLS */
 unsigned int levelmax;
+
+#define NUM_EVENTS 9
+
+const char *events[NUM_EVENTS] = {
+        "L1-dcache-loads",
+        "L1-dcache-stores",
+        "L1-dcache-load-misses",
+        "LLC-loads",
+        "LLC-stores",
+        "LLC-load-misses",
+        "LLC-store-misses",
+        "cache-references",
+        "cache-misses"
+};
+
+
+enum event_num {
+    L1_CACHE_LOADS,
+    L1_CACHE_STORES,
+    L1_CACHE_MISSES,
+    L3_CACHE_LOADS,
+    L3_CACHE_STORES,
+    L3_CACHE_LOAD_MISSES,
+    L3_CACHE_STORE_MISSES,
+    TOTAL_CACHE_REFS,
+    TOTAL_CACHE_MISSES
+};
 
 typedef struct barrier {
 	pthread_cond_t complete;
@@ -124,6 +156,12 @@ typedef struct thread_data {
 	sl_intset_t *set;
 	barrier_t *barrier;
 	unsigned long failures_because_contention;
+    unsigned long L1_cache_accesses;
+    unsigned long L1_cache_misses;
+    unsigned long L3_cache_accesses;
+    unsigned long L3_cache_misses;
+    unsigned long total_cache_accesses;
+    unsigned long total_cache_misses;
 } thread_data_t;
 
 
@@ -150,15 +188,50 @@ void print_skiplist(sl_intset_t *set) {
 
 
 void *test(void *data) {
-	int unext, last = -1; 
+	int unext, last = -1, i;
 	val_t val = 0;
 	
 	thread_data_t *d = (thread_data_t *)data;
-	
 	/* Create transaction */
 	TM_THREAD_ENTER();
-	/* Wait on barrier */
+
+    /* set up perf events for cache behavior */
+    struct perf_event_attr pe[NUM_EVENTS];
+    int fds[NUM_EVENTS];
+    unsigned long counts[NUM_EVENTS];
+    pfm_initialize();
+
+    for (i = 0; i < NUM_EVENTS; i++) {
+        memset(&pe[i], 0, sizeof(struct perf_event_attr));
+        pe[i].size = sizeof(struct perf_event_attr);
+        pe[i].type = PERF_TYPE_RAW;
+        pe[i].disabled = 1;
+        pe[i].exclude_kernel = 1;
+        pe[i].exclude_hv = 1;
+
+        pfm_perf_encode_arg_t arg;
+        memset(&arg, 0, sizeof(arg));
+        arg.attr = &pe[i];
+
+        if (pfm_get_os_event_encoding(events[i], PFM_PLM3, PFM_OS_PERF_EVENT, &arg) != PFM_SUCCESS) {
+            fprintf(stderr, "Error encoding event %s\n", events[i]);
+            exit(1);
+        }
+
+        fds[i] = perf_event_open(&pe[i], 0, -1, -1, 0);
+        if (fds[i] == -1) {
+            perror("perf_event_open failed");
+            exit(1);
+        }
+    }
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_RESET, 0);
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
+
+    /* Wait on barrier */
 	barrier_cross(d->barrier);
+
+    /* start counting cache events*/
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_ENABLE, 0);
 	
 	/* Is the first op an update? */
 	unext = (rand_range_re(&d->seed, 100) - 1 < d->update);
@@ -240,7 +313,22 @@ void *test(void *data) {
 #else
 	}
 #endif /* ICC */
-	
+
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
+    for (i = 0; i < NUM_EVENTS; i++) read(fds[i], &counts[i], sizeof(uint64_t));;
+
+    d->L1_cache_accesses = counts[L1_CACHE_LOADS] + counts[L1_CACHE_STORES];
+    d->L1_cache_misses = counts[L1_CACHE_MISSES];
+    d->L3_cache_accesses = counts[L3_CACHE_LOADS] + counts[L3_CACHE_STORES];
+    d->L3_cache_misses = counts[L3_CACHE_LOAD_MISSES] + counts[L3_CACHE_STORE_MISSES];
+    d->total_cache_accesses = counts[TOTAL_CACHE_REFS];
+    d->total_cache_misses = counts[TOTAL_CACHE_MISSES];
+
+    for (i = 0; i < NUM_EVENTS; i++) {
+        //perf_event_destroy(perf_events[i]);
+        close(fds[i]);
+    }
+
 	/* Free transaction */
 	TM_THREAD_EXIT();
 	
@@ -274,7 +362,8 @@ int main(int argc, char **argv)
 	val_t val = 0;
 	unsigned long reads, effreads, updates, effupds, aborts, aborts_locked_read, aborts_locked_write,
 	aborts_validate_read, aborts_validate_write, aborts_validate_commit,
-	aborts_invalid_memory, aborts_double_write, max_retries, failures_because_contention;
+	aborts_invalid_memory, aborts_double_write, max_retries, failures_because_contention,
+    L1_cache_accesses, L1_cache_misses, /*L2_cache_accesses, L2_cache_misses,*/ L3_cache_accesses, L3_cache_misses, total_cache_accesses, total_cache_misses;
 	thread_data_t *data;
 	pthread_t *threads;
 	pthread_attr_t attr;
@@ -482,6 +571,12 @@ int main(int argc, char **argv)
 		data[i].set = set;
 		data[i].barrier = &barrier;
 		data[i].failures_because_contention = 0;
+        data[i].L1_cache_misses = 0;
+        data[i].L1_cache_accesses = 0;
+        data[i].L3_cache_misses = 0;
+        data[i].L3_cache_accesses = 0;
+        data[i].total_cache_misses = 0;
+        data[i].total_cache_accesses = 0;
 		if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
 			fprintf(stderr, "Error creating thread\n");
 			exit(1);
@@ -541,6 +636,13 @@ int main(int argc, char **argv)
 	updates = 0;
 	effupds = 0;
 	max_retries = 0;
+    L1_cache_misses = 0;
+    L1_cache_accesses = 0;
+    L3_cache_misses = 0;
+    L3_cache_accesses = 0;
+    total_cache_misses = 0;
+    total_cache_accesses = 0;
+
 	for (i = 0; i < nb_threads; i++) {
 		printf("Thread %d\n", i);
 		printf("  #add        : %lu\n", data[i].nb_add);
@@ -559,6 +661,12 @@ int main(int argc, char **argv)
 		printf("    #dup-w    : %lu\n", data[i].nb_aborts_double_write);
 		printf("    #failures : %lu\n", data[i].failures_because_contention);
 		printf("  Max retries : %lu\n", data[i].max_retries);
+//        printf("#L1 cache misses    : %lu\n", data[i].L1_cache_misses);
+//        printf("#L1 cache accesses  : %lu\n", data[i].L1_cache_accesses);
+//        printf("#L3 cache misses    : %lu\n", data[i].L3_cache_misses);
+//        printf("#L3 cache accesses  : %lu\n", data[i].L3_cache_accesses);
+//        printf("#total cache misses    : %lu\n", data[i].total_cache_misses);
+//        printf("#total cache accesses  : %lu\n", data[i].total_cache_accesses);
 		aborts += data[i].nb_aborts;
 		aborts_locked_read += data[i].nb_aborts_locked_read;
 		aborts_locked_write += data[i].nb_aborts_locked_write;
@@ -575,6 +683,12 @@ int main(int argc, char **argv)
 		updates += (data[i].nb_add + data[i].nb_remove);
 		effupds += data[i].nb_removed + data[i].nb_added; 
 		size += data[i].nb_added - data[i].nb_removed;
+        L1_cache_misses += data[i].L1_cache_misses;
+        L1_cache_accesses += data[i].L1_cache_accesses;
+        L3_cache_misses += data[i].L3_cache_misses;
+        L3_cache_accesses += data[i].L3_cache_accesses;
+        total_cache_misses += data[i].total_cache_misses;
+        total_cache_accesses += data[i].total_cache_accesses;
 		if (max_retries < data[i].max_retries)
 			max_retries = data[i].max_retries;
 	}
@@ -607,6 +721,16 @@ int main(int argc, char **argv)
 	printf("  #dup-w      : %lu (%f / s)\n", aborts_double_write, aborts_double_write * 1000.0 / duration);
 	printf("  #failures   : %lu\n",  failures_because_contention);
 	printf("Max retries   : %lu\n", max_retries);
+
+    printf("#L1 cache misses    : %lu\n", L1_cache_misses);
+    printf("#L1 cache accesses  : %lu\n", L1_cache_accesses);
+    printf("#L1 cache miss%%  : %f\n", 100.0*L1_cache_misses/L1_cache_accesses);
+    printf("#L3 cache misses    : %lu\n", L3_cache_misses);
+    printf("#L3 cache accesses  : %lu\n", L3_cache_accesses);
+    printf("#L3 cache miss%%  : %f\n", 100.0*L3_cache_misses/L3_cache_accesses);
+    printf("#total cache misses    : %lu\n", total_cache_misses);
+    printf("#total cache accesses  : %lu\n", total_cache_accesses);
+    printf("#total cache miss%%  : %f\n", 100.0*total_cache_misses/total_cache_accesses);
 	
 	// Delete set 
         sl_set_delete(set);
