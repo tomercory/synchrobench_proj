@@ -137,6 +137,7 @@ typedef struct thread_data {
 	int unit_tx;
 	int alternate;
 	int effective;
+    int cache_monitoring;
 	unsigned long nb_add;
 	unsigned long nb_added;
 	unsigned long nb_remove;
@@ -248,42 +249,46 @@ void *test(void *data) {
 	TM_THREAD_ENTER();
 
     /* set up perf events for cache behavior */
-    struct perf_event_attr pe[NUM_EVENTS];
     int fds[NUM_EVENTS];
     unsigned long counts[NUM_EVENTS];
-    pfm_initialize();
+    if (d->cache_monitoring) {
+        struct perf_event_attr pe[NUM_EVENTS];
+        pfm_initialize();
 
-    for (i = 0; i < NUM_EVENTS; i++) {
-        memset(&pe[i], 0, sizeof(struct perf_event_attr));
-        pe[i].size = sizeof(struct perf_event_attr);
-        pe[i].type = PERF_TYPE_RAW;
-        pe[i].disabled = 1;
-        pe[i].exclude_kernel = 1;
-        pe[i].exclude_hv = 1;
+        for (i = 0; i < NUM_EVENTS; i++) {
+            memset(&pe[i], 0, sizeof(struct perf_event_attr));
+            pe[i].size = sizeof(struct perf_event_attr);
+            pe[i].type = PERF_TYPE_RAW;
+            pe[i].disabled = 1;
+            pe[i].exclude_kernel = 1;
+            pe[i].exclude_hv = 1;
 
-        pfm_perf_encode_arg_t arg;
-        memset(&arg, 0, sizeof(arg));
-        arg.attr = &pe[i];
+            pfm_perf_encode_arg_t arg;
+            memset(&arg, 0, sizeof(arg));
+            arg.attr = &pe[i];
 
-        if (pfm_get_os_event_encoding(events[i], PFM_PLM3, PFM_OS_PERF_EVENT, &arg) != PFM_SUCCESS) {
-            fprintf(stderr, "Error encoding event %s\n", events[i]);
-            exit(1);
+            if (pfm_get_os_event_encoding(events[i], PFM_PLM3, PFM_OS_PERF_EVENT, &arg) != PFM_SUCCESS) {
+                fprintf(stderr, "Error encoding event %s\n", events[i]);
+                exit(1);
+            }
+
+            fds[i] = perf_event_open(&pe[i], 0, -1, -1, 0);
+            if (fds[i] == -1) {
+                perror("perf_event_open failed");
+                exit(1);
+            }
         }
-
-        fds[i] = perf_event_open(&pe[i], 0, -1, -1, 0);
-        if (fds[i] == -1) {
-            perror("perf_event_open failed");
-            exit(1);
-        }
+        for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_RESET, 0);
+        for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
     }
-    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_RESET, 0);
-    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
 
     /* Wait on barrier */
 	barrier_cross(d->barrier);
 
     /* start counting cache events*/
-    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_ENABLE, 0);
+    if (d->cache_monitoring) {
+        for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_ENABLE, 0);
+    }
 	
 	/* Is the first op an update? */
 	unext = (rand_range_re(&d->seed, 100) - 1 < d->update);
@@ -365,20 +370,21 @@ void *test(void *data) {
 #else
 	}
 #endif /* ICC */
+    if (d->cache_monitoring) {
+        for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
+        for (i = 0; i < NUM_EVENTS; i++) read(fds[i], &counts[i], sizeof(uint64_t));;
 
-    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
-    for (i = 0; i < NUM_EVENTS; i++) read(fds[i], &counts[i], sizeof(uint64_t));;
+        d->L1_cache_accesses = counts[L1_CACHE_LOADS] + counts[L1_CACHE_STORES];
+        d->L1_cache_misses = counts[L1_CACHE_MISSES];
+        d->L3_cache_accesses = counts[L3_CACHE_LOADS] + counts[L3_CACHE_STORES];
+        d->L3_cache_misses = counts[L3_CACHE_LOAD_MISSES] + counts[L3_CACHE_STORE_MISSES];
+        d->total_cache_accesses = counts[TOTAL_CACHE_REFS];
+        d->total_cache_misses = counts[TOTAL_CACHE_MISSES];
 
-    d->L1_cache_accesses = counts[L1_CACHE_LOADS] + counts[L1_CACHE_STORES];
-    d->L1_cache_misses = counts[L1_CACHE_MISSES];
-    d->L3_cache_accesses = counts[L3_CACHE_LOADS] + counts[L3_CACHE_STORES];
-    d->L3_cache_misses = counts[L3_CACHE_LOAD_MISSES] + counts[L3_CACHE_STORE_MISSES];
-    d->total_cache_accesses = counts[TOTAL_CACHE_REFS];
-    d->total_cache_misses = counts[TOTAL_CACHE_MISSES];
-
-    for (i = 0; i < NUM_EVENTS; i++) {
-        //perf_event_destroy(perf_events[i]);
-        close(fds[i]);
+        for (i = 0; i < NUM_EVENTS; i++) {
+            //perf_event_destroy(perf_events[i]);
+            close(fds[i]);
+        }
     }
 
 	/* Free transaction */
@@ -404,6 +410,7 @@ int main(int argc, char **argv)
 		{"seed",                      required_argument, NULL, 's'},
 		{"update-rate",               required_argument, NULL, 'u'},
 		{"elasticity",                required_argument, NULL, 'x'},
+        {"cache monitoring", required_argument, NULL, 'm'},
 		{NULL, 0, NULL, 0}
 	};
 	
@@ -431,11 +438,12 @@ int main(int argc, char **argv)
 	int unit_tx = DEFAULT_ELASTICITY;
 	int alternate = DEFAULT_ALTERNATE;
 	int effective = DEFAULT_EFFECTIVE;
+    int cache_monitoring = DEFAULT_MONITOR;
 	sigset_t block_set;
 	
 	while(1) {
 		i = 0;
-		c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:"
+		c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:m:"
 										, long_options, &i);
 		
 		if(c == -1)
@@ -481,6 +489,9 @@ int main(int argc, char **argv)
 								 "        3 = read/add elastic-tx,\n"
 								 "        4 = read/add/rem elastic-tx,\n"
 								 "        5 = fraser lock-free\n"
+                                 "  -m, --cache monitoring (default=0)\n"
+                                 "        0 = do not monitor cache,\n"
+                                 "        1 = monitor cache,\n"
 								 );
 					exit(0);
 				case 'A':
@@ -510,6 +521,9 @@ int main(int argc, char **argv)
 				case 'x':
 					unit_tx = atoi(optarg);
 					break;
+                case 'm':
+                    cache_monitoring = atoi(optarg);
+                    break;
 				case '?':
 					printf("Use -h or --help for help\n");
 					exit(0);
@@ -692,6 +706,7 @@ int main(int argc, char **argv)
 		data[i].set = set;
 		data[i].barrier = &barrier;
 		data[i].failures_because_contention = 0;
+        data[i].cache_monitoring = cache_monitoring;
         data[i].L1_cache_misses = 0;
         data[i].L1_cache_accesses = 0;
         data[i].L3_cache_misses = 0;
@@ -842,16 +857,17 @@ int main(int argc, char **argv)
 	printf("  #dup-w      : %lu (%f / s)\n", aborts_double_write, aborts_double_write * 1000.0 / duration);
 	printf("  #failures   : %lu\n",  failures_because_contention);
 	printf("Max retries   : %lu\n", max_retries);
-
-    printf("#L1 cache misses    : %lu\n", L1_cache_misses);
-    printf("#L1 cache accesses  : %lu\n", L1_cache_accesses);
-    printf("#L1 cache miss%%  : %f\n", 100.0*L1_cache_misses/L1_cache_accesses);
-    printf("#L3 cache misses    : %lu\n", L3_cache_misses);
-    printf("#L3 cache accesses  : %lu\n", L3_cache_accesses);
-    printf("#L3 cache miss%%  : %f\n", 100.0*L3_cache_misses/L3_cache_accesses);
-    printf("#total cache misses    : %lu\n", total_cache_misses);
-    printf("#total cache accesses  : %lu\n", total_cache_accesses);
-    printf("#total cache miss%%  : %f\n", 100.0*total_cache_misses/total_cache_accesses);
+    if (cache_monitoring) {
+        printf("#L1 cache misses    : %lu\n", L1_cache_misses);
+        printf("#L1 cache accesses  : %lu\n", L1_cache_accesses);
+        printf("#L1 cache miss%%  : %f\n", 100.0 * L1_cache_misses / L1_cache_accesses);
+        printf("#L3 cache misses    : %lu\n", L3_cache_misses);
+        printf("#L3 cache accesses  : %lu\n", L3_cache_accesses);
+        printf("#L3 cache miss%%  : %f\n", 100.0 * L3_cache_misses / L3_cache_accesses);
+        printf("#total cache misses    : %lu\n", total_cache_misses);
+        printf("#total cache accesses  : %lu\n", total_cache_accesses);
+        printf("#total cache miss%%  : %f\n", 100.0 * total_cache_misses / total_cache_accesses);
+    }
 	
 	// Delete set 
         sl_set_delete(set);
