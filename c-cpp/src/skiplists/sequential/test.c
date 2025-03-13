@@ -381,10 +381,7 @@ void *test(void *data) {
         d->total_cache_accesses = counts[TOTAL_CACHE_REFS];
         d->total_cache_misses = counts[TOTAL_CACHE_MISSES];
 
-        for (i = 0; i < NUM_EVENTS; i++) {
-            //perf_event_destroy(perf_events[i]);
-            close(fds[i]);
-        }
+        for (i = 0; i < NUM_EVENTS; i++) close(fds[i]);
     }
 
 	/* Free transaction */
