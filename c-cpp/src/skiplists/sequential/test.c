@@ -38,6 +38,7 @@ pthread_key_t rng_seed_key;
 unsigned int levelmax;
 
 #define NUM_EVENTS 9
+#define LOG2NUMTHREADS 7
 
 const char *events[NUM_EVENTS] = {
         "L1-dcache-loads",
@@ -138,6 +139,7 @@ typedef struct thread_data {
 	int alternate;
 	int effective;
     int cache_monitoring;
+	int validation_txs;
 	unsigned long nb_add;
 	unsigned long nb_added;
 	unsigned long nb_remove;
@@ -346,6 +348,34 @@ void catcher(int sig)
 	printf("CAUGHT SIGNAL %d\n", sig);
 }
 
+void* sanity_check(void *data) {
+	// TODO - finalize, add fine grained tests too
+	thread_data_t *d = (thread_data_t *)data;
+	unsigned int lsb = d->first;
+	//printf("my lsb is: %d\n", lsb);
+	unsigned int key;
+	sleep(1);
+	/* Wait on barrier */
+	barrier_cross(d->barrier);
+	for (int i=0; i<d->validation_txs; ++i){
+		key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
+		if (key == 0) continue;
+		if (!sl_contains_old(d->set, key, TRANSACTIONAL)){
+			if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %lu\n", key);
+			if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %lu\n", key);
+			if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+				if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %lu\n", key);
+				if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains removed key %lu\n", key);
+			}
+		}
+		else {
+			if(sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %lu\n", key);
+		}
+	}
+	printf("Thread %d local test done\n", lsb);
+	return NULL;
+}
+
 int main(int argc, char **argv)
 {
 	struct option long_options[] = {
@@ -359,6 +389,7 @@ int main(int argc, char **argv)
 		{"update-rate",               required_argument, NULL, 'u'},
 		{"elasticity",                required_argument, NULL, 'x'},
         {"cache monitoring", required_argument, NULL, 'm'},
+		{"test mode", required_argument, NULL, 'v'},
 		{NULL, 0, NULL, 0}
 	};
 	
@@ -387,11 +418,12 @@ int main(int argc, char **argv)
 	int alternate = DEFAULT_ALTERNATE;
 	int effective = DEFAULT_EFFECTIVE;
     int cache_monitoring = DEFAULT_MONITOR;
+    int test_mode = DEFAULT_TEST;
 	sigset_t block_set;
 	
 	while(1) {
 		i = 0;
-		c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:m:"
+		c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:m:v:"
 										, long_options, &i);
 		
 		if(c == -1)
@@ -440,6 +472,9 @@ int main(int argc, char **argv)
                                  "  -m, --cache monitoring (default=0)\n"
                                  "        0 = do not monitor cache,\n"
                                  "        1 = monitor cache,\n"
+                                 "  -v, --test mode (default=0)\n"
+								 "        0 = run benchmark,\n"
+								 "        1 = validate correctness,\n"
 								 );
 					exit(0);
 				case 'A':
@@ -472,6 +507,9 @@ int main(int argc, char **argv)
                 case 'm':
                     cache_monitoring = atoi(optarg);
                     break;
+				case 'v':
+					test_mode = atoi(optarg);
+				break;
 				case '?':
 					printf("Use -h or --help for help\n");
 					exit(0);
@@ -592,9 +630,18 @@ int main(int argc, char **argv)
         data[i].L3_cache_accesses = 0;
         data[i].total_cache_misses = 0;
         data[i].total_cache_accesses = 0;
-		if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
-			fprintf(stderr, "Error creating thread\n");
-			exit(1);
+		data[i].validation_txs = test_mode;
+        if (test_mode) { // TODO - add the appropriate run ending in case of test.
+			if (pthread_create(&threads[i], &attr, sanity_check, (void *)(&data[i])) != 0) {
+				fprintf(stderr, "Error creating thread\n");
+				exit(1);
+			}
+        }
+		else {
+			if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
+				fprintf(stderr, "Error creating thread\n");
+				exit(1);
+			}
 		}
 	}
 	pthread_attr_destroy(&attr);
