@@ -46,6 +46,7 @@
 #define DEFAULT_ALTERNATE               0
 #define DEFAULT_EFFECTIVE               1
 #define DEFAULT_MONITOR                 0
+#define DEFAULT_TEST                    0
 
 #define XSTR(s)                         STR(s)
 #define STR(s)                          #s
