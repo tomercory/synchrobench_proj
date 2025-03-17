@@ -33,56 +33,29 @@ int sl_contains(sl_intset_t *set, val_t val, int transactional)
 	
 	int i;
 	sl_node_t *node, *next;
+    bool goDown;
 	
 	node = set->head;
-	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next[i];
-		while (next->val < val) {
-			node = next;
-			next = node->next[i];
-		}
-	}
+	i = node->toplevel-1;
+    while(i >= 0){
+    	next = node->next[i];
+        goDown = next->val >= val;
+        node = node*(goDown) + next*(!goDown);
+        i = i - goDown;
+    }
+//	for (i = node->toplevel-1; i >= 0; i--) {
+//		next = node->next[i];
+//		while (next->val < val) {
+//			node = next;
+//			next = node->next[i];
+//		}
+//	}
+
 	node = node->next[0];
 	result = (node->val == val);
 		
 #elif defined STM
-	
-	int i;
-	sl_node_t *node, *next;
-	val_t v = VAL_MIN;
-
-	if (transactional > 1) {
-	
-	  TX_START(EL);
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	  }
-	  node = (sl_node_t *)TX_LOAD(&node->next[0]);
-	  result = (v == val);
-	  TX_END;
-
-	} else {
-
-	  TX_START(NL);
-	  node = set->head;
-	  for (i = node->toplevel-1; i >= 0; i--) {
-	    next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    while ((v = TX_LOAD(&next->val)) < val) {
-	      node = next;
-	      next = (sl_node_t *)TX_LOAD(&node->next[i]);
-	    }
-	  }
-	  node = (sl_node_t *)TX_LOAD(&node->next[0]);
-	  result = (v == val);
-	  TX_END;
-
-	}
-	
+	// not supported
 #endif
 	
 	return result;
