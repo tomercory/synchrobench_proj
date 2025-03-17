@@ -398,7 +398,6 @@ void catcher(int sig)
 }
 
 void* sanity_check(void *data) {
-	// TODO - finalize, add fine grained tests too
 	thread_data_t *d = (thread_data_t *)data;
 	unsigned int lsb = d->first;
 	//printf("my lsb is: %d\n", lsb);
@@ -409,16 +408,22 @@ void* sanity_check(void *data) {
 	for (int i=0; i<d->validation_txs; ++i){
 		key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
 		if (key == 0) continue;
-		if (!sl_contains_old(d->set, key, TRANSACTIONAL)){
-			if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert key %lu\n", key);
-			if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains key %lu\n", key);
+		if (!sl_contains(d->set, key, TRANSACTIONAL)){
+			if(sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: managed to remove non-existent key %lu\n", key);
+			if(!sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: failed to insert non-existent key %lu\n", key);
+			if(!sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: failed to find key %lu after insertion \n", key);
+			if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: managed to insert an already existent key %lu\n", key);
 			if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-				if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD remove key %lu\n", key);
-				if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD contains removed key %lu\n", key);
+				if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %lu after insertion \n", key);
+				if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %lu after removal \n", key);
 			}
 		}
 		else {
-			if(sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %lu\n", key);
+			if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %lu\n", key);
+			if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+				if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %lu after insertion \n", key);
+				if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %lu after removal \n", key);
+			}
 		}
 	}
 	printf("Thread %d local test done\n", lsb);
@@ -749,7 +754,7 @@ int main(int argc, char **argv)
         data[i].total_cache_misses = 0;
         data[i].total_cache_accesses = 0;
 		data[i].validation_txs = test_mode;
-        if (test_mode) { // TODO - add the appropriate run ending in case of test.
+        if (test_mode) {
 			if (pthread_create(&threads[i], &attr, sanity_check, (void *)(&data[i])) != 0) {
 				fprintf(stderr, "Error creating thread\n");
 				exit(1);
@@ -792,6 +797,9 @@ int main(int argc, char **argv)
 	
 	gettimeofday(&end, NULL);
 	printf("STOPPING...\n");
+	if (test_mode) {
+		printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
+	}
 	
 	// Wait for thread completion 
 	for (i = 0; i < nb_threads; i++) {
@@ -800,121 +808,122 @@ int main(int argc, char **argv)
 			exit(1);
 		}
 	}
-	
-	duration = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
-	aborts = 0;
-	aborts_locked_read = 0;
-	aborts_locked_write = 0;
-	aborts_validate_read = 0;
-	aborts_validate_write = 0;
-	aborts_validate_commit = 0;
-	aborts_invalid_memory = 0;
-	aborts_double_write = 0;
-	failures_because_contention = 0;
-	reads = 0;
-	effreads = 0;
-	updates = 0;
-	effupds = 0;
-	max_retries = 0;
-    L1_cache_misses = 0;
-    L1_cache_accesses = 0;
-    L3_cache_misses = 0;
-    L3_cache_accesses = 0;
-    total_cache_misses = 0;
-    total_cache_accesses = 0;
+	if (!test_mode) {
+		duration = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
+		aborts = 0;
+		aborts_locked_read = 0;
+		aborts_locked_write = 0;
+		aborts_validate_read = 0;
+		aborts_validate_write = 0;
+		aborts_validate_commit = 0;
+		aborts_invalid_memory = 0;
+		aborts_double_write = 0;
+		failures_because_contention = 0;
+		reads = 0;
+		effreads = 0;
+		updates = 0;
+		effupds = 0;
+		max_retries = 0;
+		L1_cache_misses = 0;
+		L1_cache_accesses = 0;
+		L3_cache_misses = 0;
+		L3_cache_accesses = 0;
+		total_cache_misses = 0;
+		total_cache_accesses = 0;
 
-	for (i = 0; i < nb_threads; i++) {
-		printf("Thread %d\n", i);
-		printf("  #add        : %lu\n", data[i].nb_add);
-		printf("    #added    : %lu\n", data[i].nb_added);
-		printf("  #remove     : %lu\n", data[i].nb_remove);
-		printf("    #removed  : %lu\n", data[i].nb_removed);
-		printf("  #contains   : %lu\n", data[i].nb_contains);
-		printf("  #found      : %lu\n", data[i].nb_found);
-		printf("  #aborts     : %lu\n", data[i].nb_aborts);
-		printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
-		printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
-		printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
-		printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
-		printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
-		printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
-		printf("    #dup-w    : %lu\n", data[i].nb_aborts_double_write);
-		printf("    #failures : %lu\n", data[i].failures_because_contention);
-		printf("  Max retries : %lu\n", data[i].max_retries);
-//        printf("#L1 cache misses    : %lu\n", data[i].L1_cache_misses);
-//        printf("#L1 cache accesses  : %lu\n", data[i].L1_cache_accesses);
-//        printf("#L3 cache misses    : %lu\n", data[i].L3_cache_misses);
-//        printf("#L3 cache accesses  : %lu\n", data[i].L3_cache_accesses);
-//        printf("#total cache misses    : %lu\n", data[i].total_cache_misses);
-//        printf("#total cache accesses  : %lu\n", data[i].total_cache_accesses);
-		aborts += data[i].nb_aborts;
-		aborts_locked_read += data[i].nb_aborts_locked_read;
-		aborts_locked_write += data[i].nb_aborts_locked_write;
-		aborts_validate_read += data[i].nb_aborts_validate_read;
-		aborts_validate_write += data[i].nb_aborts_validate_write;
-		aborts_validate_commit += data[i].nb_aborts_validate_commit;
-		aborts_invalid_memory += data[i].nb_aborts_invalid_memory;
-		aborts_double_write += data[i].nb_aborts_double_write;
-		failures_because_contention += data[i].failures_because_contention;
-		reads += data[i].nb_contains;
-		effreads += data[i].nb_contains + 
-		(data[i].nb_add - data[i].nb_added) + 
-		(data[i].nb_remove - data[i].nb_removed); 
-		updates += (data[i].nb_add + data[i].nb_remove);
-		effupds += data[i].nb_removed + data[i].nb_added; 
-		size += data[i].nb_added - data[i].nb_removed;
-        L1_cache_misses += data[i].L1_cache_misses;
-        L1_cache_accesses += data[i].L1_cache_accesses;
-        L3_cache_misses += data[i].L3_cache_misses;
-        L3_cache_accesses += data[i].L3_cache_accesses;
-        total_cache_misses += data[i].total_cache_misses;
-        total_cache_accesses += data[i].total_cache_accesses;
-		if (max_retries < data[i].max_retries)
-			max_retries = data[i].max_retries;
+		for (i = 0; i < nb_threads; i++) {
+			printf("Thread %d\n", i);
+			printf("  #add        : %lu\n", data[i].nb_add);
+			printf("    #added    : %lu\n", data[i].nb_added);
+			printf("  #remove     : %lu\n", data[i].nb_remove);
+			printf("    #removed  : %lu\n", data[i].nb_removed);
+			printf("  #contains   : %lu\n", data[i].nb_contains);
+			printf("  #found      : %lu\n", data[i].nb_found);
+			printf("  #aborts     : %lu\n", data[i].nb_aborts);
+			printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
+			printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
+			printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
+			printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
+			printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
+			printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
+			printf("    #dup-w    : %lu\n", data[i].nb_aborts_double_write);
+			printf("    #failures : %lu\n", data[i].failures_because_contention);
+			printf("  Max retries : %lu\n", data[i].max_retries);
+			//        printf("#L1 cache misses    : %lu\n", data[i].L1_cache_misses);
+			//        printf("#L1 cache accesses  : %lu\n", data[i].L1_cache_accesses);
+			//        printf("#L3 cache misses    : %lu\n", data[i].L3_cache_misses);
+			//        printf("#L3 cache accesses  : %lu\n", data[i].L3_cache_accesses);
+			//        printf("#total cache misses    : %lu\n", data[i].total_cache_misses);
+			//        printf("#total cache accesses  : %lu\n", data[i].total_cache_accesses);
+			aborts += data[i].nb_aborts;
+			aborts_locked_read += data[i].nb_aborts_locked_read;
+			aborts_locked_write += data[i].nb_aborts_locked_write;
+			aborts_validate_read += data[i].nb_aborts_validate_read;
+			aborts_validate_write += data[i].nb_aborts_validate_write;
+			aborts_validate_commit += data[i].nb_aborts_validate_commit;
+			aborts_invalid_memory += data[i].nb_aborts_invalid_memory;
+			aborts_double_write += data[i].nb_aborts_double_write;
+			failures_because_contention += data[i].failures_because_contention;
+			reads += data[i].nb_contains;
+			effreads += data[i].nb_contains +
+			(data[i].nb_add - data[i].nb_added) +
+			(data[i].nb_remove - data[i].nb_removed);
+			updates += (data[i].nb_add + data[i].nb_remove);
+			effupds += data[i].nb_removed + data[i].nb_added;
+			size += data[i].nb_added - data[i].nb_removed;
+			L1_cache_misses += data[i].L1_cache_misses;
+			L1_cache_accesses += data[i].L1_cache_accesses;
+			L3_cache_misses += data[i].L3_cache_misses;
+			L3_cache_accesses += data[i].L3_cache_accesses;
+			total_cache_misses += data[i].total_cache_misses;
+			total_cache_accesses += data[i].total_cache_accesses;
+			if (max_retries < data[i].max_retries)
+				max_retries = data[i].max_retries;
+		}
+		printf("Set size      : %lu (expected: %lu)\n", sl_set_size(set), size);
+		printf("Duration      : %d (ms)\n", duration);
+		printf("#txs          : %lu (%f / s)\n", reads + updates, (reads + updates) * 1000.0 / duration);
+
+		printf("#read txs     : ");
+		if (effective) {
+			printf("%lu (%f / s)\n", effreads, effreads * 1000.0 / duration);
+			printf("  #contains   : %lu (%f / s)\n", reads, reads * 1000.0 / duration);
+		} else printf("%lu (%f / s)\n", reads, reads * 1000.0 / duration);
+
+		printf("#eff. upd rate: %f \n", 100.0 * effupds / (effupds + effreads));
+
+		printf("#update txs   : ");
+		if (effective) {
+			printf("%lu (%f / s)\n", effupds, effupds * 1000.0 / duration);
+			printf("  #upd trials : %lu (%f / s)\n", updates, updates * 1000.0 /
+						 duration);
+		} else printf("%lu (%f / s)\n", updates, updates * 1000.0 / duration);
+
+		printf("#aborts       : %lu (%f / s)\n", aborts, aborts * 1000.0 / duration);
+		printf("  #lock-r     : %lu (%f / s)\n", aborts_locked_read, aborts_locked_read * 1000.0 / duration);
+		printf("  #lock-w     : %lu (%f / s)\n", aborts_locked_write, aborts_locked_write * 1000.0 / duration);
+		printf("  #val-r      : %lu (%f / s)\n", aborts_validate_read, aborts_validate_read * 1000.0 / duration);
+		printf("  #val-w      : %lu (%f / s)\n", aborts_validate_write, aborts_validate_write * 1000.0 / duration);
+		printf("  #val-c      : %lu (%f / s)\n", aborts_validate_commit, aborts_validate_commit * 1000.0 / duration);
+		printf("  #inv-mem    : %lu (%f / s)\n", aborts_invalid_memory, aborts_invalid_memory * 1000.0 / duration);
+		printf("  #dup-w      : %lu (%f / s)\n", aborts_double_write, aborts_double_write * 1000.0 / duration);
+		printf("  #failures   : %lu\n",  failures_because_contention);
+		printf("Max retries   : %lu\n", max_retries);
+		if (cache_monitoring) {
+			printf("#L1 cache misses    : %lu\n", L1_cache_misses);
+			printf("#L1 cache accesses  : %lu\n", L1_cache_accesses);
+			printf("#L1 cache miss%%  : %f\n", 100.0 * L1_cache_misses / L1_cache_accesses);
+			printf("#L3 cache misses    : %lu\n", L3_cache_misses);
+			printf("#L3 cache accesses  : %lu\n", L3_cache_accesses);
+			printf("#L3 cache miss%%  : %f\n", 100.0 * L3_cache_misses / L3_cache_accesses);
+			printf("#total cache misses    : %lu\n", total_cache_misses);
+			printf("#total cache accesses  : %lu\n", total_cache_accesses);
+			printf("#total cache miss%%  : %f\n", 100.0 * total_cache_misses / total_cache_accesses);
+		}
 	}
-	printf("Set size      : %lu (expected: %lu)\n", sl_set_size(set), size);
-	printf("Duration      : %d (ms)\n", duration);
-	printf("#txs          : %lu (%f / s)\n", reads + updates, (reads + updates) * 1000.0 / duration);
-	
-	printf("#read txs     : ");
-	if (effective) {
-		printf("%lu (%f / s)\n", effreads, effreads * 1000.0 / duration);
-		printf("  #contains   : %lu (%f / s)\n", reads, reads * 1000.0 / duration);
-	} else printf("%lu (%f / s)\n", reads, reads * 1000.0 / duration);
-	
-	printf("#eff. upd rate: %f \n", 100.0 * effupds / (effupds + effreads));
-	
-	printf("#update txs   : ");
-	if (effective) {
-		printf("%lu (%f / s)\n", effupds, effupds * 1000.0 / duration);
-		printf("  #upd trials : %lu (%f / s)\n", updates, updates * 1000.0 / 
-					 duration);
-	} else printf("%lu (%f / s)\n", updates, updates * 1000.0 / duration);
-	
-	printf("#aborts       : %lu (%f / s)\n", aborts, aborts * 1000.0 / duration);
-	printf("  #lock-r     : %lu (%f / s)\n", aborts_locked_read, aborts_locked_read * 1000.0 / duration);
-	printf("  #lock-w     : %lu (%f / s)\n", aborts_locked_write, aborts_locked_write * 1000.0 / duration);
-	printf("  #val-r      : %lu (%f / s)\n", aborts_validate_read, aborts_validate_read * 1000.0 / duration);
-	printf("  #val-w      : %lu (%f / s)\n", aborts_validate_write, aborts_validate_write * 1000.0 / duration);
-	printf("  #val-c      : %lu (%f / s)\n", aborts_validate_commit, aborts_validate_commit * 1000.0 / duration);
-	printf("  #inv-mem    : %lu (%f / s)\n", aborts_invalid_memory, aborts_invalid_memory * 1000.0 / duration);
-	printf("  #dup-w      : %lu (%f / s)\n", aborts_double_write, aborts_double_write * 1000.0 / duration);
-	printf("  #failures   : %lu\n",  failures_because_contention);
-	printf("Max retries   : %lu\n", max_retries);
-    if (cache_monitoring) {
-        printf("#L1 cache misses    : %lu\n", L1_cache_misses);
-        printf("#L1 cache accesses  : %lu\n", L1_cache_accesses);
-        printf("#L1 cache miss%%  : %f\n", 100.0 * L1_cache_misses / L1_cache_accesses);
-        printf("#L3 cache misses    : %lu\n", L3_cache_misses);
-        printf("#L3 cache accesses  : %lu\n", L3_cache_accesses);
-        printf("#L3 cache miss%%  : %f\n", 100.0 * L3_cache_misses / L3_cache_accesses);
-        printf("#total cache misses    : %lu\n", total_cache_misses);
-        printf("#total cache accesses  : %lu\n", total_cache_accesses);
-        printf("#total cache miss%%  : %f\n", 100.0 * total_cache_misses / total_cache_accesses);
-    }
 	
 	// Delete set 
-        sl_set_delete(set);
+	sl_set_delete(set);
 	
 	// Cleanup STM 
 	TM_SHUTDOWN();
