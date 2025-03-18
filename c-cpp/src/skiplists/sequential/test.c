@@ -401,28 +401,28 @@ void* sanity_check(void *data) {
 	thread_data_t *d = (thread_data_t *)data;
 	unsigned int lsb = d->first;
 	//printf("my lsb is: %d\n", lsb);
-	unsigned int key;
+	int key, i;
 	sleep(1);
 	/* Wait on barrier */
 	barrier_cross(d->barrier);
-	for (int i=0; i<d->validation_txs; ++i){
+	for (i=0; i<d->validation_txs; ++i){
 		key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
 		if (key == 0) continue;
 		if (!sl_contains(d->set, key, TRANSACTIONAL)){
-			if(sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: managed to remove non-existent key %lu\n", key);
-			if(!sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: failed to insert non-existent key %lu\n", key);
-			if(!sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: failed to find key %lu after insertion \n", key);
-			if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: managed to insert an already existent key %lu\n", key);
+			if(sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: managed to remove non-existent key %d\n", key);
+			if(!sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: failed to insert non-existent key %d\n", key);
+			if(!sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: failed to find key %d after insertion \n", key);
+			if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: managed to insert an already existent key %d\n", key);
 			if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-				if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %lu after insertion \n", key);
-				if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %lu after removal \n", key);
+				if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %d after insertion \n", key);
+				if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %d after removal \n", key);
 			}
 		}
 		else {
-			if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %lu\n", key);
+			if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %d\n", key);
 			if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-				if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %lu after insertion \n", key);
-				if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %lu after removal \n", key);
+				if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %d after insertion \n", key);
+				if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %d after removal \n", key);
 			}
 		}
 	}
@@ -755,6 +755,7 @@ int main(int argc, char **argv)
         data[i].total_cache_accesses = 0;
 		data[i].validation_txs = test_mode;
         if (test_mode) {
+            data[i].first = i;
 			if (pthread_create(&threads[i], &attr, sanity_check, (void *)(&data[i])) != 0) {
 				fprintf(stderr, "Error creating thread\n");
 				exit(1);
