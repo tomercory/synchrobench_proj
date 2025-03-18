@@ -31,17 +31,24 @@ int sl_contains(sl_intset_t *set, val_t val, int transactional)
 	
 #ifdef SEQUENTIAL /* Unprotected */
 	
-	int i;
+	int i, goDown;
 	sl_node_t *node, *next;
 	
 	node = set->head;
-	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next_arr[i].next;
-		while (node->next_arr[i].next_val < val) {
-			node = next;
-			next = node->next_arr[i].next;
-		}
-	}
+    i = node->toplevel-1;
+    while(i >= 0){
+    	next = node->next_arr[i].next;
+        goDown = node->next_arr[i].next_val >= val;
+        node = (sl_node_t *)(((unsigned long)node)*(goDown) + ((unsigned long)next)*(!goDown));
+        i = i - goDown;
+    }
+//	for (i = node->toplevel-1; i >= 0; i--) {
+//		next = node->next_arr[i].next;
+//		while (node->next_arr[i].next_val < val) {
+//			node = next;
+//			next = node->next_arr[i].next;
+//		}
+//	}
     result = (node->next_arr[0].next_val == val);
 		
 #elif defined STM

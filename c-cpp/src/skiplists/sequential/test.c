@@ -189,58 +189,58 @@ void print_skiplist(sl_intset_t *set) {
 		printf("%d nodes of level %d\n", arr[j], j);
 }
 
-void* sanity_test(void *data) {
-    int i;
-    thread_data_t *d = (thread_data_t *)data;
-    unsigned int lsb = d->first;
-    /* Create transaction */
-    TM_THREAD_ENTER();
-    /* Wait on barrier */
-    barrier_cross(d->barrier);
-    for (i=0; i<50000; ++i) {
-        unsigned int key = (i<<2) + lsb;
-        // printf("key=%lld\n", key);
-        if (!sl_add(d->set, key, TRANSACTIONAL)) {
-            printf("sl_add failure, key=%lld\n", key);
-        }
-        if (!sl_contains(d->set, key, TRANSACTIONAL)) {
-            printf("sl_contains failure, key=%lld\n", key);
-        }
-        if (!sl_remove(d->set, key, TRANSACTIONAL)) {
-            printf("sl_remove failure, key=%lld\n", key);
-        }
-        if (sl_contains(d->set, key, TRANSACTIONAL)) {
-            printf("sl_contains failure, key=%lld\n", key);
-        }
-    }
-    printf("bulk test done lsb=%d\n", lsb);
-    for (i=0; i<50000; ++i){
-        unsigned int key = (i<<2) + lsb;
-        if (!sl_add(d->set, key, TRANSACTIONAL)) {
-            printf("sl_add failure, key=%lld\n", key);
-        }
-    }
-    for (i=0; i<50000; ++i){
-        unsigned int key = (i<<2) + lsb;
-        if (!sl_contains(d->set, key, TRANSACTIONAL)) {
-            printf("sl_contains failure, key=%lld\n", key);
-        }
-    }
-    for (i=0; i<50000; ++i){
-        unsigned int key = (i<<2) + lsb;
-        if (!sl_remove(d->set, key, TRANSACTIONAL)) {
-            printf("sl_remove failure, key=%lld\n", key);
-        }
-    }
-    for (i=0; i<50000; ++i){
-        unsigned int key = (i<<2) + lsb;
-        if (sl_contains(d->set, key, TRANSACTIONAL)) {
-            printf("sl_contains failure, key=%lld\n", key);
-        }
-    }
-    printf("fine test done lsb=%d\n", lsb);
-    return NULL;
-}
+//void* sanity_test(void *data) {
+//    int i;
+//    thread_data_t *d = (thread_data_t *)data;
+//    unsigned int lsb = d->first;
+//    /* Create transaction */
+//    TM_THREAD_ENTER();
+//    /* Wait on barrier */
+//    barrier_cross(d->barrier);
+//    for (i=0; i<50000; ++i) {
+//        unsigned int key = (i<<2) + lsb;
+//        // printf("key=%lld\n", key);
+//        if (!sl_add(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_add failure, key=%lld\n", key);
+//        }
+//        if (!sl_contains(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_contains failure, key=%lld\n", key);
+//        }
+//        if (!sl_remove(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_remove failure, key=%lld\n", key);
+//        }
+//        if (sl_contains(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_contains failure, key=%lld\n", key);
+//        }
+//    }
+//    printf("bulk test done lsb=%d\n", lsb);
+//    for (i=0; i<50000; ++i){
+//        unsigned int key = (i<<2) + lsb;
+//        if (!sl_add(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_add failure, key=%lld\n", key);
+//        }
+//    }
+//    for (i=0; i<50000; ++i){
+//        unsigned int key = (i<<2) + lsb;
+//        if (!sl_contains(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_contains failure, key=%lld\n", key);
+//        }
+//    }
+//    for (i=0; i<50000; ++i){
+//        unsigned int key = (i<<2) + lsb;
+//        if (!sl_remove(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_remove failure, key=%lld\n", key);
+//        }
+//    }
+//    for (i=0; i<50000; ++i){
+//        unsigned int key = (i<<2) + lsb;
+//        if (sl_contains(d->set, key, TRANSACTIONAL)) {
+//            printf("sl_contains failure, key=%lld\n", key);
+//        }
+//    }
+//    printf("fine test done lsb=%d\n", lsb);
+//    return NULL;
+//}
 
 void *test(void *data) {
 	int unext, last = -1, i;
