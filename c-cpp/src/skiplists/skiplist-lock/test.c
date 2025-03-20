@@ -34,6 +34,8 @@ pthread_key_t rng_seed_key;
 #endif /* ! TLS */
 unsigned int levelmax;
 
+#define LOG2NUMTHREADS 7
+
 typedef struct barrier {
   pthread_cond_t complete;
   pthread_mutex_t mutex;
@@ -107,6 +109,7 @@ typedef struct thread_data {
   int unit_tx;
   int alternate;
   int effective;
+  int validation_txs;
   unsigned long nb_add;
   unsigned long nb_added;
   unsigned long nb_remove;
@@ -145,18 +148,6 @@ void print_skiplist(sl_intset_t *set) {
   } while (curr); 
   for (j=0; j<levelmax; j++)
     printf("%d nodes of level %d\n", arr[j], j);
-}
-
-
-void *test3(void *data) {
-	
-  thread_data_t *d = (thread_data_t *)data;
-	
-  /* Wait on barrier */
-  barrier_cross(d->barrier);
-	
-  while (stop == 0) {;}
-  return NULL;
 }
 
 
@@ -642,21 +633,21 @@ void *test2(void *data)
     effupds = 0;
     max_retries = 0;
     for (i = 0; i < nb_threads; i++) {
-      printf("Thread %d\n", i);
-      printf("  #add        : %lu\n", data[i].nb_add);
-      printf("    #added    : %lu\n", data[i].nb_added);
-      printf("  #remove     : %lu\n", data[i].nb_remove);
-      printf("    #removed  : %lu\n", data[i].nb_removed);
-      printf("  #contains   : %lu\n", data[i].nb_contains);
-      printf("  #found      : %lu\n", data[i].nb_found);
-      printf("  #aborts     : %lu\n", data[i].nb_aborts);
-      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
-      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
-      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
-      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
-      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
-      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
-      printf("  Max retries : %lu\n", data[i].max_retries);
+//      printf("Thread %d\n", i);
+//      printf("  #add        : %lu\n", data[i].nb_add);
+//      printf("    #added    : %lu\n", data[i].nb_added);
+//      printf("  #remove     : %lu\n", data[i].nb_remove);
+//      printf("    #removed  : %lu\n", data[i].nb_removed);
+//      printf("  #contains   : %lu\n", data[i].nb_contains);
+//      printf("  #found      : %lu\n", data[i].nb_found);
+//      printf("  #aborts     : %lu\n", data[i].nb_aborts);
+//      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
+//      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
+//      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
+//      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
+//      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
+//      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
+//      printf("  Max retries : %lu\n", data[i].max_retries);
       aborts += data[i].nb_aborts;
       aborts_locked_read += data[i].nb_aborts_locked_read;
       aborts_locked_write += data[i].nb_aborts_locked_write;

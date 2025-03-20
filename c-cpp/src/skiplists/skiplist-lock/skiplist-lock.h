@@ -49,9 +49,10 @@
 #define DEFAULT_RANGE                   0x7FFFFFFF
 #define DEFAULT_SEED                    0
 #define DEFAULT_UPDATE                  20
-#define DEFAULT_ELASTICITY		4
+#define DEFAULT_ELASTICITY		        4
 #define DEFAULT_ALTERNATE               0
-#define DEFAULT_EFFECTIVE 		1
+#define DEFAULT_EFFECTIVE 		        1
+#define DEFAULT_TEST                    0
 
 #define XSTR(s)                         STR(s)
 #define STR(s)                          #s
