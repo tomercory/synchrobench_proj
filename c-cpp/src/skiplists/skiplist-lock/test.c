@@ -132,8 +132,7 @@ typedef struct thread_data {
   unsigned int seed;
   sl_intset_t *set;
   barrier_t *barrier;
-  int num;
-} thread_data_t;
+  thread_data_t;
 
 void print_skiplist(sl_intset_t *set) {
   sl_node_t *curr;
@@ -191,7 +190,6 @@ void *test(void *data) {
       if (last < 0) { // add
 				
 	val = rand_range_re(&d->seed, d->range);
-    // printf("thread=%d sl_add val=%lld\n", d->num, val);
 	if (sl_add(d->set, val, TRANSACTIONAL)) {
 	  d->nb_added++;
 	  last = val;
@@ -212,7 +210,6 @@ void *test(void *data) {
 	  // Random computation only in non-alternated cases 
 	  val = rand_range_re(&d->seed, d->range);
 	  // Remove one random value
-        // printf("thread=%d sl_remove val=%lld\n", d->num, val);
         if (sl_remove(d->set, val, TRANSACTIONAL)) {
 	    d->nb_removed++;
 	    // Repeat until successful, to avoid size variations 
