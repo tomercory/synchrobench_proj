@@ -158,147 +158,9 @@ void print_skiplist(sl_intset_t *set) {
     printf("%d nodes of level %d\n", arr[j], j);
 }
 
-void* sanity_test(void *data) {
-    // should run with ./bin/SPIN-skiplist -t 4
-    int i;
-    val_t last = -1;
-    val_t val = 0;
-    int unext;
-    sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    pthread_setspecific(preds_key, preds);
-    pthread_setspecific(succs_key, succs);
 
-    thread_data_t *d = (thread_data_t *)data;
 
-    unsigned int lsb = d->first;
 
-    /* Wait on barrier */
-    barrier_cross(d->barrier);
-    for (i=0; i<10000; ++i) {
-        val = (i<<2) + lsb;
-        if (val == 0) continue;
-        if(sl_contains(d->set, val, TRANSACTIONAL)) printf("bulk BAD contains uninserted val %lu\n", val);
-        if(!sl_add(d->set, val, TRANSACTIONAL)) printf("bulk BAD insert val %lu\n", val);
-        if(!sl_contains(d->set, val, TRANSACTIONAL)) printf("bulk BAD contains val %lu\n", val);
-        if(!sl_remove(d->set, val, TRANSACTIONAL)) printf("bulk BAD remove val %lu\n", val);
-        if(sl_contains(d->set, val, TRANSACTIONAL)) printf("bulk BAD contains removed val %lu\n", val);
-        //printf("handled val %d\n", val);
-    }
-    printf("%d bulk test done\n", lsb);
-    for (i=0; i<10000; ++i) {
-        val = (i<<2) + lsb;
-        if (val == 0) continue;
-        if(sl_contains(d->set, val, TRANSACTIONAL)) printf("BAD contains uninserted val %lu\n", val);
-    }
-    for (i=0; i<10000; ++i) {
-        val = (i<<2) + lsb;
-        if (val == 0) continue;
-        if(!sl_add(d->set, val, TRANSACTIONAL)) printf("BAD insert val %lu\n", val);
-    }
-    for (i=0; i<10000; ++i) {
-        val = (i<<2) + lsb;
-        if (val == 0) continue;
-        if(!sl_contains(d->set, val, TRANSACTIONAL)) printf("BAD contains val %lu\n", val);
-    }
-    for (i=0; i<10000; ++i) {
-        val = (i<<2) + lsb;
-        if (val == 0) continue;
-        if(!sl_remove(d->set, val, TRANSACTIONAL)) printf("BAD remove val %lu\n", val);
-    }
-    for (i=0; i<10000; ++i) {
-        val = (i<<2) + lsb;
-        if (val == 0) continue;
-        if(sl_contains(d->set, val, TRANSACTIONAL)) printf("BAD contains removed val %lu\n", val);
-    }
-    printf("%d fine test done\n", lsb);
-    for (i=0; i<50; ++i) { // re-populate list for final print
-        val = ((i*20000)<<2) + lsb;
-        if (val == 0) continue;
-        if(!sl_add(d->set, val, TRANSACTIONAL)) printf("BAD insert val %lu\n", val);
-    }
-
-    return NULL;
-}
-void* tougher_sanity_test(void *data) {
-    // should run with ./bin/SPIN-skiplist -t 8
-    int i;
-    val_t last = -1;
-    val_t val = 0;
-    int unext;
-    sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    pthread_setspecific(preds_key, preds);
-    pthread_setspecific(succs_key, succs);
-
-    thread_data_t *d = (thread_data_t *)data;
-
-    unsigned int lsb = d->first;
-
-    /* Wait on barrier */
-    barrier_cross(d->barrier);
-    for (i=0; i<TEST_INSERTIONS; ++i) {
-        val = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
-        if (val == 0) continue;
-        if (!sl_contains(d->set, val, TRANSACTIONAL)){
-            if(!sl_add(d->set, val, TRANSACTIONAL)) printf("BAD insert val %lu\n", val);
-            if(!sl_contains(d->set, val, TRANSACTIONAL)) printf("BAD contains val %lu\n", val);
-            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-                if(!sl_remove(d->set, val, TRANSACTIONAL)) printf("BAD remove val %lu\n", val);
-                if(sl_contains(d->set, val, TRANSACTIONAL)) printf("BAD contains removed val %lu\n", val);
-            }
-        }
-        else {
-            if(sl_add(d->set, val, TRANSACTIONAL)) printf("BAD insert contained val %lu\n", val);
-        }
-    }
-    printf("Thread %d local test done\n", lsb);
-    return NULL;
-}
-void* very_easy_sanity_test(void *data) {
-    int i;
-    val_t last = -1;
-    val_t val = 0;
-    int unext;
-    sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    pthread_setspecific(preds_key, preds);
-    pthread_setspecific(succs_key, succs);
-
-    thread_data_t *d = (thread_data_t *)data;
-
-    unsigned int lsb = d->first;
-
-    /* Wait on barrier */
-    barrier_cross(d->barrier);
-
-     for (i=0; i<100000; ++i) {
-        val = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
-        //printf("now working with val: %lu, VAL_MAX=%lu\n", val, VAL_MAX);
-        if (val == 0) continue;
-        if (!sl_contains(d->set, val, TRANSACTIONAL)){
-            if(!sl_add(d->set, val, TRANSACTIONAL)) printf("BAD insert val %lu\n", val);
-            if(!sl_contains(d->set, val, TRANSACTIONAL)) printf("BAD contains val %lu\n", val);
-            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-                if(!sl_remove(d->set, val, TRANSACTIONAL)) printf("BAD remove val %lu\n", val);
-                if(sl_contains(d->set, val, TRANSACTIONAL)) printf("BAD contains removed val %lu\n", val);
-            }
-        }
-    }
-    printf("Thread %d local test done\n", lsb);
-    return NULL;
-}
-
-void *test3(void *data) {
-	
-  thread_data_t *d = (thread_data_t *)data;
-	
-  /* Wait on barrier */
-  barrier_cross(d->barrier);
-	
-  while (stop == 0) {;}
-  return NULL;
-}
 
 
 void *test(void *data) {
@@ -413,70 +275,7 @@ void *test(void *data) {
   return NULL;
 }
 
-void *test2(void *data)
-{
-  int val, newval, last = 0;
-  thread_data_t *d = (thread_data_t *)data;
-	
-#ifdef TLS
-  rng_seed = &d->seed;
-#else /* ! TLS */
-  pthread_setspecific(rng_seed_key, &d->seed);
-#endif /* ! TLS */
-	
-  /* Wait on barrier */
-  barrier_cross(d->barrier);
-	
-  last = -1;
-	
-#ifdef ICC
-  while (stop == 0) {
-#else
-    while (AO_load_full(&stop) == 0) {
-#endif /* ICC */
-			
-      val = rand_range_re(&d->seed, 100) - 1;
-      if (val < d->update) {
-	if (last < 0) {
-	  /* Add random value */
-	  val = rand_range_re(&d->seed, d->range);
-	  if (sl_add(d->set, val, TRANSACTIONAL)) {
-	    d->nb_added++;
-	    last = val;
-	  }
-	  d->nb_add++;
-	} else {
-	  if (d->alternate) {
-	    /* Remove last value */
-	    if (sl_remove(d->set, last, TRANSACTIONAL)) {
-	      d->nb_removed++;
-	      last = -1; 
-	    }
-	    d->nb_remove++;
-	  } else {
-	    /* Random computation only in non-alternated cases */
-	    newval = rand_range_re(&d->seed, d->range);
-	    /* Remove one random value */
-	    if (sl_remove(d->set, newval, TRANSACTIONAL)) {
-	      d->nb_removed++;
-	      /* Repeat until successful, to avoid size variations */
-	      last = -1;
-	    }
-	    d->nb_remove++;
-	  }
-	}
-      } else {
-	/* Look for random value */
-	val = rand_range_re(&d->seed, d->range);
-	if (sl_contains(d->set, val, TRANSACTIONAL))
-	  d->nb_found++;
-	d->nb_contains++;
-      }
-			
-    }
-		
-    return NULL;
-  }
+
 	
   int main(int argc, char **argv)
   {
@@ -694,70 +493,7 @@ void *test2(void *data)
     /* Access set from all threads */
     barrier_init(&barrier, nb_threads + 1);
     pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-    ///////////////////////////////////////////////// Sanity Check - comment to toggle ////////////////////////////////////////////////
-    bool tough = false; // change to false if required
-    for (i = 0; i < nb_threads; i++) {
-      printf("Creating thread %d\n", i);
-      data[i].first = i; // used for LSB
-      data[i].range = range;
-      data[i].update = update;
-      data[i].unit_tx = unit_tx;
-      data[i].alternate = alternate;
-      data[i].effective = effective;
-      data[i].nb_add = 0;
-      data[i].nb_added = 0;
-      data[i].nb_remove = 0;
-      data[i].nb_removed = 0;
-      data[i].nb_contains = 0;
-      data[i].nb_found = 0;
-      data[i].nb_aborts = 0;
-      data[i].nb_aborts_locked_read = 0;
-      data[i].nb_aborts_locked_write = 0;
-      data[i].nb_aborts_validate_read = 0;
-      data[i].nb_aborts_validate_write = 0;
-      data[i].nb_aborts_validate_commit = 0;
-      data[i].nb_aborts_invalid_memory = 0;
-      data[i].max_retries = 0;
-      data[i].seed = rand();
-      data[i].set = set;
-      data[i].barrier = &barrier;
-      if (pthread_create(&threads[i], &attr, (tough ? tougher_sanity_test : sanity_test), (void *)(&data[i])) != 0) {
-          fprintf(stderr, "Error creating thread\n");
-          exit(1);
-      }
-    }
-    pthread_attr_destroy(&attr);
-
-    /* Start threads */
-    barrier_cross(&barrier);
-
-    /* Wait for thread completion */
-    for (i = 0; i < nb_threads; i++) {
-        if (pthread_join(threads[i], NULL) != 0) {
-            fprintf(stderr, "Error waiting for thread completion\n");
-            exit(1);
-        }
-    }
-
-    gc_subsystem_destroy();
-
-    /* Delete set */
-    ptst = ptst_critical_enter();
-    sl_set_delete(set, ptst);
-    ptst_critical_exit(ptst);
-
-#ifndef TLS
-    pthread_key_delete(rng_seed_key);
-#endif /* ! TLS */
-    pthread_key_delete(preds_key);
-    pthread_key_delete(succs_key);
-
-    free(threads);
-    free(data);
-
-    return 0;
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE)
 
     for (i = 0; i < nb_threads; i++) {
       printf("Creating thread %d\n", i);
@@ -850,21 +586,21 @@ void *test2(void *data)
     effupds = 0;
     max_retries = 0;
     for (i = 0; i < nb_threads; i++) {
-      printf("Thread %d\n", i);
-      printf("  #add        : %lu\n", data[i].nb_add);
-      printf("    #added    : %lu\n", data[i].nb_added);
-      printf("  #remove     : %lu\n", data[i].nb_remove);
-      printf("    #removed  : %lu\n", data[i].nb_removed);
-      printf("  #contains   : %lu\n", data[i].nb_contains);
-      printf("  #found      : %lu\n", data[i].nb_found);
-      printf("  #aborts     : %lu\n", data[i].nb_aborts);
-      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
-      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
-      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
-      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
-      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
-      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
-      printf("  Max retries : %lu\n", data[i].max_retries);
+//      printf("Thread %d\n", i);
+//      printf("  #add        : %lu\n", data[i].nb_add);
+//      printf("    #added    : %lu\n", data[i].nb_added);
+//      printf("  #remove     : %lu\n", data[i].nb_remove);
+//      printf("    #removed  : %lu\n", data[i].nb_removed);
+//      printf("  #contains   : %lu\n", data[i].nb_contains);
+//      printf("  #found      : %lu\n", data[i].nb_found);
+//      printf("  #aborts     : %lu\n", data[i].nb_aborts);
+//      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
+//      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
+//      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
+//      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
+//      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
+//      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
+//      printf("  Max retries : %lu\n", data[i].max_retries);
       aborts += data[i].nb_aborts;
       aborts_locked_read += data[i].nb_aborts_locked_read;
       aborts_locked_write += data[i].nb_aborts_locked_write;
