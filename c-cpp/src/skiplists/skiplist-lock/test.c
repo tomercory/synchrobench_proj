@@ -39,6 +39,8 @@ pthread_key_t rng_seed_key;
 #endif /* ! TLS */
 unsigned int levelmax;
 
+#define LOG2NUMTHREADS 7
+
 typedef struct barrier {
   pthread_cond_t complete;
   pthread_mutex_t mutex;
@@ -112,6 +114,7 @@ typedef struct thread_data {
   int unit_tx;
   int alternate;
   int effective;
+  int validation_txs;
   unsigned long nb_add;
   unsigned long nb_added;
   unsigned long nb_remove;
@@ -157,9 +160,6 @@ void print_skiplist(sl_intset_t *set) {
   for (j=0; j<levelmax; j++)
     printf("%d nodes of level %d\n", arr[j], j);
 }
-
-
-
 
 
 
