@@ -216,6 +216,44 @@ void print_skiplist(struct sl_set *set) {
 
 
 
+void* sanity_check(void *data) {
+    thread_data_t *d = (thread_data_t *)data;
+    unsigned int lsb = d->first;
+    printf("my lsb is: %d\n", lsb);
+    unsigned int key;
+    sleep(1);
+
+    /* Wait on barrier */
+    barrier_cross(d->barrier);
+
+    for (int i=0; i<d->validation_txs; ++i){
+        key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
+        if (key == 0) continue;
+        if (!sl_contains(d->set, key, TRANSACTIONAL)){
+            if(sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: managed to remove non-existent key %d\n", key);
+            if(!sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: failed to insert non-existent key %d\n", key);
+            if(!sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: failed to find key %d after insertion \n", key);
+            if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: managed to insert an already existent key %d\n", key);
+            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+                if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %d after insertion \n", key);
+                if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %d after removal \n", key);
+            }
+        }
+        else {
+            if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %d\n", key);
+            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+                if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %d after insertion \n", key);
+                if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %d after removal \n", key);
+            }
+        }
+    }
+
+    printf("Thread %d local test done\n", lsb);
+    return NULL;
+}
+
+
+
 void *test(void *data) {
 	int unext, last = -1; 
 	unsigned int val = 0;
@@ -659,7 +697,7 @@ int main(int argc, char **argv)
     if (test_mode) {
         printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
     }
-    if (!test_mode) {
+    else {
         duration = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
         aborts = 0;
         aborts_locked_read = 0;
