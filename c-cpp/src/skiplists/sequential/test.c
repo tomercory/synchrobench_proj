@@ -694,7 +694,7 @@ int main(int argc, char **argv)
         printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
     }
 
-	if (!test_mode) {
+	else {
 		duration = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
 		aborts = 0;
 		aborts_locked_read = 0;
