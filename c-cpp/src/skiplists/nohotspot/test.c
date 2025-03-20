@@ -218,7 +218,6 @@ void print_skiplist(struct sl_set *set) {
 void* sanity_check(void *data) {
     thread_data_t *d = (thread_data_t *)data;
     unsigned int lsb = d->first;
-    printf("my lsb is: %d\n", lsb);
     unsigned int key;
     sleep(1);
 
@@ -229,20 +228,20 @@ void* sanity_check(void *data) {
         key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
         if (key == 0) continue;
         if (!sl_contains_old(d->set, key, TRANSACTIONAL)){
-            if(sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to remove non-existent key %d\n", key);
-            if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to insert non-existent key %d\n", key);
-            if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to find key %d after insertion \n", key);
-            if(sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to insert an already existent key %d\n", key);
+            if(sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to remove non-existent key %u\n", key);
+            if(!sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to insert non-existent key %u\n", key);
+            if(!sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to find key %u after insertion \n", key);
+            if(sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to insert an already existent key %u\n", key);
             if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %d after insertion \n", key);
-                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %d after removal \n", key);
+                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %u after insertion \n", key);
+                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %u after removal \n", key);
             }
         }
         else {
-            if(sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %d\n", key);
+            if(sl_add_old(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %u\n", key);
             if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %d after insertion \n", key);
-                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %d after removal \n", key);
+                if(!sl_remove_old(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %u after insertion \n", key);
+                if(sl_contains_old(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %u after removal \n", key);
             }
         }
     }
