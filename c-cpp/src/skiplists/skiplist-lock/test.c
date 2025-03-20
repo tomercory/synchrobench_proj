@@ -261,70 +261,44 @@ void *test(void *data) {
   return NULL;
 }
 
-void *test2(void *data)
-{
-  int val, newval, last = 0;
-  thread_data_t *d = (thread_data_t *)data;
-	
-#ifdef TLS
-  rng_seed = &d->seed;
-#else /* ! TLS */
-  pthread_setspecific(rng_seed_key, &d->seed);
-#endif /* ! TLS */
-	
-  /* Wait on barrier */
-  barrier_cross(d->barrier);
-	
-  last = -1;
-	
-#ifdef ICC
-  while (stop == 0) {
-#else
-    while (AO_load_full(&stop) == 0) {
-#endif /* ICC */
-			
-      val = rand_range_re(&d->seed, 100) - 1;
-      if (val < d->update) {
-	if (last < 0) {
-	  /* Add random value */
-	  val = rand_range_re(&d->seed, d->range);
-	  if (sl_add(d->set, val, TRANSACTIONAL)) {
-	    d->nb_added++;
-	    last = val;
-	  }
-	  d->nb_add++;
-	} else {
-	  if (d->alternate) {
-	    /* Remove last value */
-	    if (sl_remove(d->set, last, TRANSACTIONAL)) {
-	      d->nb_removed++;
-	      last = -1; 
-	    }
-	    d->nb_remove++;
-	  } else {
-	    /* Random computation only in non-alternated cases */
-	    newval = rand_range_re(&d->seed, d->range);
-	    /* Remove one random value */
-	    if (sl_remove(d->set, newval, TRANSACTIONAL)) {
-	      d->nb_removed++;
-	      /* Repeat until successful, to avoid size variations */
-	      last = -1;
-	    }
-	    d->nb_remove++;
-	  }
-	}
-      } else {
-	/* Look for random value */
-	val = rand_range_re(&d->seed, d->range);
-	if (sl_contains(d->set, val, TRANSACTIONAL))
-	  d->nb_found++;
-	d->nb_contains++;
-      }
-			
+void* sanity_check(void *data) {
+    int i;
+    val_t key;
+    sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
+    sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
+    pthread_setspecific(preds_key, preds);
+    pthread_setspecific(succs_key, succs);
+
+    thread_data_t *d = (thread_data_t *)data;
+
+    unsigned int lsb = d->first;
+
+    /* Wait on barrier */
+    barrier_cross(d->barrier);
+    for (i=0; i<d->validation_txs; ++i){
+        key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
+        if (key == 0) continue;
+        if (!sl_contains(d->set, key, TRANSACTIONAL)){
+            if(sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: managed to remove non-existent key %lu\n", key);
+            if(!sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: failed to insert non-existent key %lu\n", key);
+            if(!sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: failed to find key %lu after insertion \n", key);
+            if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD: managed to insert an already existent key %lu\n", key);
+            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+                if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %lu after insertion \n", key);
+                if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %lu after removal \n", key);
+            }
+        }
+        else {
+            if(sl_add(d->set, key, TRANSACTIONAL)) printf("BAD insert contained key %lu\n", key);
+            if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+                if(!sl_remove(d->set, key, TRANSACTIONAL)) printf("BAD: failed to remove key %lu after insertion \n", key);
+                if(sl_contains(d->set, key, TRANSACTIONAL)) printf("BAD: managed to find key %lu after removal \n", key);
+            }
+        }
     }
-		
+    printf("Thread %d local test done\n", lsb);
     return NULL;
-  }
+}
 	
   int main(int argc, char **argv)
   {
@@ -338,6 +312,7 @@ void *test2(void *data)
       {"seed",                      required_argument, NULL, 'S'},
       {"update-rate",               required_argument, NULL, 'u'},
       {"unit-tx",                   required_argument, NULL, 'x'},
+      {"test mode", required_argument, NULL, 'v'},
       {NULL, 0, NULL, 0}
     };
 		
@@ -363,12 +338,13 @@ void *test2(void *data)
     int unit_tx = DEFAULT_ELASTICITY;
     int alternate = DEFAULT_ALTERNATE;
     int effective = DEFAULT_EFFECTIVE;
+    int test_mode = DEFAULT_TEST;
     sigset_t block_set;
     struct sl_ptst *ptst;
 		
     while(1) {
       i = 0;
-      c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:"
+      c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:v:"
 		      , long_options, &i);
 			
       if(c == -1)
@@ -416,6 +392,9 @@ void *test2(void *data)
 	       "        4 = read/add/rem unit-tx,\n"
 	       "        5 = all recursive unit-tx,\n"
 	       "        6 = harris lock-free\n"
+           "  -v, --test mode (default=0)\n"
+           "        0 = run benchmark,\n"
+           "        non-zero = validate correctness, dictates number of validation txs,\n"
 	       );
 	exit(0);
       case 'A':
@@ -445,6 +424,9 @@ void *test2(void *data)
       case 'x':
 	unit_tx = atoi(optarg);
 	break;
+      case 'v':
+          test_mode = atoi(optarg);
+          break;
       case '?':
 	printf("Use -h or --help for help\n");
 	exit(0);
@@ -568,10 +550,20 @@ void *test2(void *data)
       data[i].seed = rand();
       data[i].set = set;
       data[i].barrier = &barrier;
-      if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
-	fprintf(stderr, "Error creating thread\n");
-	exit(1);
-      }
+        data[i].validation_txs = test_mode;
+        if (test_mode) {
+            data[i].first = i;
+            if (pthread_create(&threads[i], &attr, sanity_check, (void *)(&data[i])) != 0) {
+                fprintf(stderr, "Error creating thread\n");
+                exit(1);
+            }
+        }
+        else {
+            if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
+                fprintf(stderr, "Error creating thread\n");
+                exit(1);
+            }
+        }
     }
     pthread_attr_destroy(&attr);
 		
@@ -617,90 +609,95 @@ void *test2(void *data)
 	exit(1);
       }
     }
-		
-    duration = (end.tv_sec * 1000 + end.tv_usec / 1000) - 
-      (start.tv_sec * 1000 + start.tv_usec / 1000);
-    aborts = 0;
-    aborts_locked_read = 0;
-    aborts_locked_write = 0;
-    aborts_validate_read = 0;
-    aborts_validate_write = 0;
-    aborts_validate_commit = 0;
-    aborts_invalid_memory = 0;
-    reads = 0;
-    effreads = 0;
-    updates = 0;
-    effupds = 0;
-    max_retries = 0;
-    for (i = 0; i < nb_threads; i++) {
-//      printf("Thread %d\n", i);
-//      printf("  #add        : %lu\n", data[i].nb_add);
-//      printf("    #added    : %lu\n", data[i].nb_added);
-//      printf("  #remove     : %lu\n", data[i].nb_remove);
-//      printf("    #removed  : %lu\n", data[i].nb_removed);
-//      printf("  #contains   : %lu\n", data[i].nb_contains);
-//      printf("  #found      : %lu\n", data[i].nb_found);
-//      printf("  #aborts     : %lu\n", data[i].nb_aborts);
-//      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
-//      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
-//      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
-//      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
-//      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
-//      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
-//      printf("  Max retries : %lu\n", data[i].max_retries);
-      aborts += data[i].nb_aborts;
-      aborts_locked_read += data[i].nb_aborts_locked_read;
-      aborts_locked_write += data[i].nb_aborts_locked_write;
-      aborts_validate_read += data[i].nb_aborts_validate_read;
-      aborts_validate_write += data[i].nb_aborts_validate_write;
-      aborts_validate_commit += data[i].nb_aborts_validate_commit;
-      aborts_invalid_memory += data[i].nb_aborts_invalid_memory;
-      reads += data[i].nb_contains;
-      effreads += data[i].nb_contains + 
-	(data[i].nb_add - data[i].nb_added) + 
-	(data[i].nb_remove - data[i].nb_removed); 
-      updates += (data[i].nb_add + data[i].nb_remove);
-      effupds += data[i].nb_removed + data[i].nb_added; 
-      size += data[i].nb_added - data[i].nb_removed;
-      if (max_retries < data[i].max_retries)
-	max_retries = data[i].max_retries;
+
+    if (test_mode) {
+        printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
     }
-    printf("Set size      : %d (expected: %d)\n", sl_set_size(set), size);
-    printf("Duration      : %d (ms)\n", duration);
-    printf("#txs          : %lu (%f / s)\n", reads + updates, 
-	   (reads + updates) * 1000.0 / duration);
-		
-    printf("#read txs     : ");
-    if (effective) {
-      printf("%lu (%f / s)\n", effreads, effreads * 1000.0 / duration);
-      printf("  #contains   : %lu (%f / s)\n", reads, reads * 1000.0 / 
-	     duration);
-    } else printf("%lu (%f / s)\n", reads, reads * 1000.0 / duration);
-		
-    printf("#eff. upd rate: %f \n", 100.0 * effupds / (effupds + effreads));
-		
-    printf("#update txs   : ");
-    if (effective) {
-      printf("%lu (%f / s)\n", effupds, effupds * 1000.0 / duration);
-      printf("  #upd trials : %lu (%f / s)\n", updates, updates * 1000.0 / 
-	     duration);
-    } else printf("%lu (%f / s)\n", updates, updates * 1000.0 / duration);
-		
-    printf("#aborts       : %lu (%f / s)\n", aborts, aborts * 1000.0 / 
-	   duration);
-    printf("  #lock-r     : %lu (%f / s)\n", aborts_locked_read, 
-	   aborts_locked_read * 1000.0 / duration);
-    printf("  #lock-w     : %lu (%f / s)\n", aborts_locked_write, 
-	   aborts_locked_write * 1000.0 / duration);
-    printf("  #val-r      : %lu (%f / s)\n", aborts_validate_read, 
-	   aborts_validate_read * 1000.0 / duration);
-    printf("  #val-w      : %lu (%f / s)\n", aborts_validate_write, 
-	   aborts_validate_write * 1000.0 / duration);
-    printf("  #val-c      : %lu (%f / s)\n", aborts_validate_commit, 
-	   aborts_validate_commit * 1000.0 / duration);
-    printf("  #inv-mem    : %lu (%f / s)\n", aborts_invalid_memory, 
-	   aborts_invalid_memory * 1000.0 / duration);
-    printf("Max retries   : %lu\n", max_retries);
+    else {
+        duration = (end.tv_sec * 1000 + end.tv_usec / 1000) -
+                   (start.tv_sec * 1000 + start.tv_usec / 1000);
+        aborts = 0;
+        aborts_locked_read = 0;
+        aborts_locked_write = 0;
+        aborts_validate_read = 0;
+        aborts_validate_write = 0;
+        aborts_validate_commit = 0;
+        aborts_invalid_memory = 0;
+        reads = 0;
+        effreads = 0;
+        updates = 0;
+        effupds = 0;
+        max_retries = 0;
+        for (i = 0; i < nb_threads; i++) {
+            //      printf("Thread %d\n", i);
+            //      printf("  #add        : %lu\n", data[i].nb_add);
+            //      printf("    #added    : %lu\n", data[i].nb_added);
+            //      printf("  #remove     : %lu\n", data[i].nb_remove);
+            //      printf("    #removed  : %lu\n", data[i].nb_removed);
+            //      printf("  #contains   : %lu\n", data[i].nb_contains);
+            //      printf("  #found      : %lu\n", data[i].nb_found);
+            //      printf("  #aborts     : %lu\n", data[i].nb_aborts);
+            //      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
+            //      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
+            //      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
+            //      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
+            //      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
+            //      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
+            //      printf("  Max retries : %lu\n", data[i].max_retries);
+            aborts += data[i].nb_aborts;
+            aborts_locked_read += data[i].nb_aborts_locked_read;
+            aborts_locked_write += data[i].nb_aborts_locked_write;
+            aborts_validate_read += data[i].nb_aborts_validate_read;
+            aborts_validate_write += data[i].nb_aborts_validate_write;
+            aborts_validate_commit += data[i].nb_aborts_validate_commit;
+            aborts_invalid_memory += data[i].nb_aborts_invalid_memory;
+            reads += data[i].nb_contains;
+            effreads += data[i].nb_contains +
+                        (data[i].nb_add - data[i].nb_added) +
+                        (data[i].nb_remove - data[i].nb_removed);
+            updates += (data[i].nb_add + data[i].nb_remove);
+            effupds += data[i].nb_removed + data[i].nb_added;
+            size += data[i].nb_added - data[i].nb_removed;
+            if (max_retries < data[i].max_retries)
+                max_retries = data[i].max_retries;
+        }
+        printf("Set size      : %d (expected: %d)\n", sl_set_size(set), size);
+        printf("Duration      : %d (ms)\n", duration);
+        printf("#txs          : %lu (%f / s)\n", reads + updates,
+               (reads + updates) * 1000.0 / duration);
+
+        printf("#read txs     : ");
+        if (effective) {
+            printf("%lu (%f / s)\n", effreads, effreads * 1000.0 / duration);
+            printf("  #contains   : %lu (%f / s)\n", reads, reads * 1000.0 /
+                                                            duration);
+        } else printf("%lu (%f / s)\n", reads, reads * 1000.0 / duration);
+
+        printf("#eff. upd rate: %f \n", 100.0 * effupds / (effupds + effreads));
+
+        printf("#update txs   : ");
+        if (effective) {
+            printf("%lu (%f / s)\n", effupds, effupds * 1000.0 / duration);
+            printf("  #upd trials : %lu (%f / s)\n", updates, updates * 1000.0 /
+                                                              duration);
+        } else printf("%lu (%f / s)\n", updates, updates * 1000.0 / duration);
+
+        printf("#aborts       : %lu (%f / s)\n", aborts, aborts * 1000.0 /
+                                                         duration);
+        printf("  #lock-r     : %lu (%f / s)\n", aborts_locked_read,
+               aborts_locked_read * 1000.0 / duration);
+        printf("  #lock-w     : %lu (%f / s)\n", aborts_locked_write,
+               aborts_locked_write * 1000.0 / duration);
+        printf("  #val-r      : %lu (%f / s)\n", aborts_validate_read,
+               aborts_validate_read * 1000.0 / duration);
+        printf("  #val-w      : %lu (%f / s)\n", aborts_validate_write,
+               aborts_validate_write * 1000.0 / duration);
+        printf("  #val-c      : %lu (%f / s)\n", aborts_validate_commit,
+               aborts_validate_commit * 1000.0 / duration);
+        printf("  #inv-mem    : %lu (%f / s)\n", aborts_invalid_memory,
+               aborts_invalid_memory * 1000.0 / duration);
+        printf("Max retries   : %lu\n", max_retries);
+    }
 		
     gc_subsystem_destroy();
 
