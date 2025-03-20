@@ -479,7 +479,7 @@ int main(int argc, char **argv)
                                  "        1 = monitor cache,\n"
                                  "  -v, --test mode (default=0)\n"
 								 "        0 = run benchmark,\n"
-								 "        1 = validate correctness,\n"
+                                 "        non-zero = validate correctness, dictates number of validation txs,\n"
 								 );
 					exit(0);
 				case 'A':
@@ -680,9 +680,7 @@ int main(int argc, char **argv)
 	
 	gettimeofday(&end, NULL);
 	printf("STOPPING...\n");
-	if (test_mode) {
-		printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
-	}
+
 	
 	// Wait for thread completion 
 	for (i = 0; i < nb_threads; i++) {
@@ -691,6 +689,11 @@ int main(int argc, char **argv)
 			exit(1);
 		}
 	}
+
+    if (test_mode) {
+        printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
+    }
+
 	if (!test_mode) {
 		duration = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
 		aborts = 0;
@@ -715,23 +718,23 @@ int main(int argc, char **argv)
 		total_cache_accesses = 0;
 
 		for (i = 0; i < nb_threads; i++) {
-			printf("Thread %d\n", i);
-			printf("  #add        : %lu\n", data[i].nb_add);
-			printf("    #added    : %lu\n", data[i].nb_added);
-			printf("  #remove     : %lu\n", data[i].nb_remove);
-			printf("    #removed  : %lu\n", data[i].nb_removed);
-			printf("  #contains   : %lu\n", data[i].nb_contains);
-			printf("  #found      : %lu\n", data[i].nb_found);
-			printf("  #aborts     : %lu\n", data[i].nb_aborts);
-			printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
-			printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
-			printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
-			printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
-			printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
-			printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
-			printf("    #dup-w    : %lu\n", data[i].nb_aborts_double_write);
-			printf("    #failures : %lu\n", data[i].failures_because_contention);
-			printf("  Max retries : %lu\n", data[i].max_retries);
+//			printf("Thread %d\n", i);
+//			printf("  #add        : %lu\n", data[i].nb_add);
+//			printf("    #added    : %lu\n", data[i].nb_added);
+//			printf("  #remove     : %lu\n", data[i].nb_remove);
+//			printf("    #removed  : %lu\n", data[i].nb_removed);
+//			printf("  #contains   : %lu\n", data[i].nb_contains);
+//			printf("  #found      : %lu\n", data[i].nb_found);
+//			printf("  #aborts     : %lu\n", data[i].nb_aborts);
+//			printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
+//			printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
+//			printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
+//			printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
+//			printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
+//			printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
+//			printf("    #dup-w    : %lu\n", data[i].nb_aborts_double_write);
+//			printf("    #failures : %lu\n", data[i].failures_because_contention);
+//			printf("  Max retries : %lu\n", data[i].max_retries);
 			//        printf("#L1 cache misses    : %lu\n", data[i].L1_cache_misses);
 			//        printf("#L1 cache accesses  : %lu\n", data[i].L1_cache_accesses);
 			//        printf("#L3 cache misses    : %lu\n", data[i].L3_cache_misses);
