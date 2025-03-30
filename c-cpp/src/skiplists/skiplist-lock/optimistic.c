@@ -27,7 +27,7 @@
  */
 
 #include "optimistic.h"
-#include <emmintrin.h> // For SSE2 intrinsics
+#include "SIMD_atomics.h"
 
 extern unsigned int levelmax;
 
@@ -35,52 +35,29 @@ inline int ok_to_delete(sl_node_t *node, int found) {
   return (node->fullylinked && ((node->toplevel-1) == found) && !node->marked);
 }
 
-static inline void atomic_read_next_entry(const sl_next_entry_t *src, sl_node_t **next_p, val_t *next_v) {
-    sl_next_entry_t local_entry;
-
-    // Atomic read of 16 bytes
-    *(__m128i *)&local_entry = _mm_load_si128((const __m128i *)src);
-
-    // Extract fields
-    *next_p = local_entry.next;
-    *next_v = local_entry.next_val;
-}
-
-static inline void atomic_write_next_entry(volatile sl_next_entry_t *dest, sl_node_t *next, val_t next_val) {
-    sl_next_entry_t next_entry = {next, next_val};
-    _mm_store_si128((__m128i *) dest, *(__m128i *) &next_entry);
-}
-
-/*
- * Function optimistic_search corresponds to the findNode method of the 
- * original paper. A fast parameter has been added to speed-up the search 
- * so that the function quits as soon as the searched element is found.
- */
 inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast) {
   int found, i;
-  sl_node_t *curr, *next_p;
-  val_t next_v;
+  sl_node_t *curr;
+  _Alignas(16) sl_next_entry_t local_next_pv;
 
   found = -1;
   curr = set->head;
 	
   for (i = (curr->toplevel - 1); i >= 0; i--) {
-    atomic_read_next_entry(&(curr->next_arr[i]), &next_p, &next_v);
-    while (val > next_v) {
-        curr = next_p;
-        atomic_read_next_entry(&(curr->next_arr[i]), &next_p, &next_v);
+    read_16_bytes_atomic((const __m128i*)&(curr->next_arr[i]), (__m128i*) &local_next_pv);
+    while (val > local_next_pv.next_val) {
+        curr = local_next_pv.next;
+        read_16_bytes_atomic((const __m128i*)&(curr->next_arr[i]), (__m128i*) &local_next_pv);
     }
     if (preds != NULL)
       preds[i] = curr;
-    succs[i] = next_p;
-    // still it doesn't handle: next_p->val <= val < next_v
-    if (found == -1 && val == next_v) {
+    succs[i] = local_next_pv.next;
+    if (found == -1 && val == local_next_pv.next_val) {
       found = i;
     }
   }
   return found;
 }
-
 /*
  * Function optimistic_find corresponds to the contains method of the original 
  * paper. In contrast with the original version, it allocates and frees the 
@@ -172,10 +149,11 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     ptst_t *ptst = ptst_critical_enter();
     new_node = sl_new_simple_node(val, toplevel, 2, ptst);
     ptst_critical_exit(ptst);
+    _Alignas(16) sl_next_entry_t local_pv = {new_node, new_node->val};
     for (i = 0; i < toplevel; i++) {
       new_node->next_arr[i].next = succs[i];
       new_node->next_arr[i].next_val = succs[i]->val;
-      atomic_write_next_entry(&(preds[i]->next_arr[i]), new_node, new_node->val);
+      write_16_bytes_atomic((__m128i*)&(preds[i]->next_arr[i]), (const __m128i*)&local_pv);
     }
 		
     new_node->fullylinked = 1;
@@ -250,9 +228,8 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 	backoff *= 2;
 	continue;
       }
-
       for (i = (toplevel-1); i >= 0; i--) {
-          atomic_write_next_entry(&(preds[i]->next_arr[i]), node_todel->next_arr[i].next, node_todel->next_arr[i].next_val);
+          write_16_bytes_atomic((__m128i*)&(preds[i]->next_arr[i]), (const __m128i*)&node_todel->next_arr[i]);
       }
       UNLOCK(&node_todel->lock);
       unlock_levels(preds, highest_locked, 22);
