@@ -22,11 +22,6 @@
  */
 
 #include "intset.h"
-#include <stdbool.h>
-
-#define  RAND_TEST_RANGE                8
-#define  LOG2NUMTHREADS                 7
-#define  TEST_INSERTIONS                100000
 
 pthread_key_t preds_key;
 pthread_key_t succs_key;
@@ -40,6 +35,17 @@ pthread_key_t rng_seed_key;
 unsigned int levelmax;
 
 #define LOG2NUMTHREADS 7
+#define DEFAULT_DURATION                10000
+#define DEFAULT_INITIAL                 256
+#define DEFAULT_NB_THREADS              1
+#define DEFAULT_RANGE                   0x7FFFFFFF
+#define DEFAULT_SEED                    0
+#define DEFAULT_UPDATE                  20
+#define DEFAULT_ELASTICITY		          4
+#define DEFAULT_ALTERNATE               0
+#define DEFAULT_EFFECTIVE 		          1
+#define DEFAULT_TEST                    0
+#define DEFAULT_PARALLELISM             1
 
 typedef struct barrier {
   pthread_cond_t complete;
@@ -107,6 +113,10 @@ inline long rand_range_re(unsigned int *seed, long r) {
 }
 long rand_range_re(unsigned int *seed, long r);
 
+static inline int max(int a, int b) {
+  return (a > b) ? a : b;
+}
+
 typedef struct thread_data {
   val_t first;
   long range;
@@ -132,7 +142,14 @@ typedef struct thread_data {
   unsigned int seed;
   sl_intset_t *set;
   barrier_t *barrier;
-  thread_data_t;
+} thread_data_t;
+
+typedef struct population_data {
+  sl_intset_t *set;
+  unsigned long to_populate;
+  long range; 
+  val_t* lastp;
+} population_data_t;
 
 void print_skiplist(sl_intset_t *set) {
   sl_node_t *curr;
@@ -142,18 +159,13 @@ void print_skiplist(sl_intset_t *set) {
   for (i=0; i< sizeof arr/sizeof arr[0]; i++) arr[i] = 0;
 	
   curr = set->head;
-  val_t prev_val = VAL_MIN;
   do {
     printf("%d", (int) curr->val);
-      if (prev_val > curr->val) {
-          printf("error!\n");
-      }
     for (i=0; i<curr->toplevel; i++) {
       printf("-*");
     }
     arr[curr->toplevel-1]++;
     printf("\n");
-      prev_val = curr->val;
     curr = curr->next_arr[0].next;
   } while (curr); 
   for (j=0; j<levelmax; j++)
@@ -161,9 +173,8 @@ void print_skiplist(sl_intset_t *set) {
 }
 
 
-
 void *test(void *data) {
-  val_t last = -1;
+  int last = -1;
   val_t val = 0;
   int unext; 
   sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
@@ -209,8 +220,8 @@ void *test(void *data) {
 					
 	  // Random computation only in non-alternated cases 
 	  val = rand_range_re(&d->seed, d->range);
-	  // Remove one random value
-        if (sl_remove(d->set, val, TRANSACTIONAL)) {
+	  // Remove one random value 
+	  if (sl_remove(d->set, val, TRANSACTIONAL)) {
 	    d->nb_removed++;
 	    // Repeat until successful, to avoid size variations 
 	    last = -1;
@@ -272,7 +283,6 @@ void *test(void *data) {
   return NULL;
 }
 
-
 void* sanity_check(void *data) {
     int i;
     val_t key;
@@ -311,422 +321,480 @@ void* sanity_check(void *data) {
     printf("Thread %d local test done\n", lsb);
     return NULL;
 }
+
+void* set_populate(void* data) {
+  int i;
+  val_t val;
+  sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
+  sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
+  pthread_setspecific(preds_key, preds);
+  pthread_setspecific(succs_key, succs);
+
+  population_data_t *d = (population_data_t *)data;
+
+  unsigned int seed = rand();
+  while (i < d->to_populate) {
+    val = rand_range_re(&seed, d->range);
+    if (sl_add(d->set, val, 0)) {
+      i++;
+      if (d->lastp != NULL)
+        *d->lastp = val;
+    }
+  }
+}
+
 	
-  int main(int argc, char **argv)
-  {
-    struct option long_options[] = {
-      // These options don't set a flag
-      {"help",                      no_argument,       NULL, 'h'},
-      {"duration",                  required_argument, NULL, 'd'},
-      {"initial-size",              required_argument, NULL, 'i'},
-      {"thread-num",                required_argument, NULL, 't'},
-      {"range",                     required_argument, NULL, 'r'},
-      {"seed",                      required_argument, NULL, 'S'},
-      {"update-rate",               required_argument, NULL, 'u'},
-      {"unit-tx",                   required_argument, NULL, 'x'},
-      {"test mode", required_argument, NULL, 'v'},
-      {NULL, 0, NULL, 0}
-    };
-		
-    sl_intset_t *set;
-    int i, c, size;
-    val_t last = 0; 
-    val_t val = 0;
-    unsigned long reads, effreads, updates, effupds, aborts, aborts_locked_read, 
-      aborts_locked_write, aborts_validate_read, aborts_validate_write, 
-      aborts_validate_commit, aborts_invalid_memory, max_retries;
-    thread_data_t *data;
-    pthread_t *threads;
-    pthread_attr_t attr;
-    barrier_t barrier;
-    struct timeval start, end;
-    struct timespec timeout;
-    int duration = DEFAULT_DURATION;
-    int initial = DEFAULT_INITIAL;
-    int nb_threads = DEFAULT_NB_THREADS;
-    long range = DEFAULT_RANGE;
-    int seed = DEFAULT_SEED;
-    int update = DEFAULT_UPDATE;
-    int unit_tx = DEFAULT_ELASTICITY;
-    int alternate = DEFAULT_ALTERNATE;
-    int effective = DEFAULT_EFFECTIVE;
-    int test_mode = DEFAULT_TEST;
-    sigset_t block_set;
-    struct sl_ptst *ptst;
-		
-    while(1) {
-      i = 0;
-      c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:v:"
-		      , long_options, &i);
-			
-      if(c == -1)
-	break;
-			
-      if(c == 0 && long_options[i].flag == 0)
-	c = long_options[i].val;
-			
-      switch(c) {
+int main(int argc, char **argv)
+{
+  struct option long_options[] = {
+    // These options don't set a flag
+    {"help",                      no_argument,       NULL, 'h'},
+    {"duration",                  required_argument, NULL, 'd'},
+    {"initial-size",              required_argument, NULL, 'i'},
+    {"thread-num",                required_argument, NULL, 't'},
+    {"range",                     required_argument, NULL, 'r'},
+    {"seed",                      required_argument, NULL, 'S'},
+    {"update-rate",               required_argument, NULL, 'u'},
+    {"unit-tx",                   required_argument, NULL, 'x'},
+    {"test mode",                 required_argument, NULL, 'v'},
+    {"population parallelism",    required_argument, NULL, 'p'},
+    {NULL, 0, NULL, 0}
+  };
+  
+  sl_intset_t *set;
+  int i, c, size;
+  val_t last = 0; 
+  val_t val = 0;
+  unsigned long reads, effreads, updates, effupds, aborts, aborts_locked_read, 
+    aborts_locked_write, aborts_validate_read, aborts_validate_write, 
+    aborts_validate_commit, aborts_invalid_memory, max_retries;
+  thread_data_t *data;
+  population_data_t *pop_data;
+  pthread_t *threads;
+  pthread_attr_t attr;
+  barrier_t barrier;
+  struct timeval start, end;
+  struct timespec timeout;
+  int duration = DEFAULT_DURATION;
+  int initial = DEFAULT_INITIAL;
+  int nb_threads = DEFAULT_NB_THREADS;
+  long range = DEFAULT_RANGE;
+  int seed = DEFAULT_SEED;
+  int update = DEFAULT_UPDATE;
+  int unit_tx = DEFAULT_ELASTICITY;
+  int alternate = DEFAULT_ALTERNATE;
+  int effective = DEFAULT_EFFECTIVE;
+  int test_mode = DEFAULT_TEST;
+  int pop_par = DEFAULT_PARALLELISM;
+  sigset_t block_set;
+  struct sl_ptst *ptst;
+  
+  while(1) {
+    i = 0;
+    c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:v:p:"
+        , long_options, &i);
+    
+    if(c == -1)
+      break;
+    
+    if(c == 0 && long_options[i].flag == 0)
+      c = long_options[i].val;
+    
+    switch(c) {
       case 0:
-	/* Flag is automatically set */
-	break;
+        /* Flag is automatically set */
+        break;
       case 'h':
-	printf("intset -- STM stress test "
-	       "(skip list)\n"
-	       "\n"
-	       "Usage:\n"
-	       "  intset [options...]\n"
-	       "\n"
-	       "Options:\n"
-	       "  -h, --help\n"
-	       "        Print this message\n"
-	       "  -A, --Alternate\n"
-	       "        Consecutive insert/remove target the same value\n"
-	       "  -f, --effective <int>\n"
-	       "        update txs must effectively write (0=trial, 1=effective, default=" XSTR(DEFAULT_EFFECTIVE) ")\n"
-	       "  -d, --duration <int>\n"
-	       "        Test duration in milliseconds (0=infinite, default=" XSTR(DEFAULT_DURATION) ")\n"
-	       "  -i, --initial-size <int>\n"
-	       "        Number of elements to insert before test (default=" XSTR(DEFAULT_INITIAL) ")\n"
-	       "  -t, --thread-num <int>\n"
-	       "        Number of threads (default=" XSTR(DEFAULT_NB_THREADS) ")\n"
-	       "  -r, --range <int>\n"
-	       "        Range of integer values inserted in set (default=" XSTR(DEFAULT_RANGE) ")\n"
-	       "  -S, --seed <int>\n"
-	       "        RNG seed (0=time-based, default=" XSTR(DEFAULT_SEED) ")\n"
-	       "  -u, --update-rate <int>\n"
-	       "        Percentage of update transactions (default=" XSTR(DEFAULT_UPDATE) ")\n"
-	       "  -x, --unit-tx (default=1)\n"
-	       "        Use unit transactions\n"
-	       "        0 = non-protected,\n"
-	       "        1 = normal transaction,\n"
-	       "        2 = read unit-tx,\n"
-	       "        3 = read/add unit-tx,\n"
-	       "        4 = read/add/rem unit-tx,\n"
-	       "        5 = all recursive unit-tx,\n"
-	       "        6 = harris lock-free\n"
-           "  -v, --test mode (default=0)\n"
-           "        0 = run benchmark,\n"
-           "        non-zero = validate correctness, dictates number of validation txs,\n"
-	       );
-	exit(0);
+        printf("intset -- STM stress test "
+                "(skip list)\n"
+                "\n"
+                "Usage:\n"
+                "  intset [options...]\n"
+                "\n"
+                "Options:\n"
+                "  -h, --help\n"
+                "        Print this message\n"
+                "  -A, --Alternate\n"
+                "        Consecutive insert/remove target the same value\n"
+                "  -f, --effective <int>\n"
+                "        update txs must effectively write (0=trial, 1=effective, default=" XSTR(DEFAULT_EFFECTIVE) ")\n"
+                "  -d, --duration <int>\n"
+                "        Test duration in milliseconds (0=infinite, default=" XSTR(DEFAULT_DURATION) ")\n"
+                "  -i, --initial-size <int>\n"
+                "        Number of elements to insert before test (default=" XSTR(DEFAULT_INITIAL) ")\n"
+                "  -t, --thread-num <int>\n"
+                "        Number of threads (default=" XSTR(DEFAULT_NB_THREADS) ")\n"
+                "  -r, --range <int>\n"
+                "        Range of integer values inserted in set (default=" XSTR(DEFAULT_RANGE) ")\n"
+                "  -S, --seed <int>\n"
+                "        RNG seed (0=time-based, default=" XSTR(DEFAULT_SEED) ")\n"
+                "  -u, --update-rate <int>\n"
+                "        Percentage of update transactions (default=" XSTR(DEFAULT_UPDATE) ")\n"
+                "  -x, --unit-tx (default=1)\n"
+                "        Use unit transactions\n"
+                "        0 = non-protected,\n"
+                "        1 = normal transaction,\n"
+                "        2 = read unit-tx,\n"
+                "        3 = read/add unit-tx,\n"
+                "        4 = read/add/rem unit-tx,\n"
+                "        5 = all recursive unit-tx,\n"
+                "        6 = harris lock-free\n"
+                "  -v, --test mode (default=0)\n"
+                "        0 = run benchmark,\n"
+                "        non-zero = validate correctness, dictates number of validation txs,\n"
+                "  -p, --population parallelism <int>\n"
+                "        Number of threads that take part in the set initialization(default=" XSTR(DEFAULT_PARALLELISM) ")\n"
+                );
+        exit(0);
       case 'A':
-	alternate = 1;
-	break;
+        alternate = 1;
+        break;
       case 'f':
-	effective = atoi(optarg);
-	break;
+        effective = atoi(optarg);
+        break;
       case 'd':
-	duration = atoi(optarg);
-	break;
+        duration = atoi(optarg);
+        break;
       case 'i':
-	initial = atoi(optarg);
-	break;
+        initial = atoi(optarg);
+        break;
       case 't':
-	nb_threads = atoi(optarg);
-	break;
+        nb_threads = atoi(optarg);
+        break;
       case 'r':
-	range = atol(optarg);
-	break;
+        range = atol(optarg);
+        break;
       case 'S':
-	seed = atoi(optarg);
-	break;
+        seed = atoi(optarg);
+        break;
       case 'u':
-	update = atoi(optarg);
-	break;
+        update = atoi(optarg);
+        break;
       case 'x':
-	unit_tx = atoi(optarg);
-	break;
+        unit_tx = atoi(optarg);
+        break;
       case 'v':
-          test_mode = atoi(optarg);
-          break;
+        test_mode = atoi(optarg);
+        break;
+      case 'p':
+        pop_par = atoi(optarg);
+        break;
       case '?':
-	printf("Use -h or --help for help\n");
-	exit(0);
+        printf("Use -h or --help for help\n");
+        exit(0);
       default:
-	exit(1);
-      }
+        exit(1);
     }
-		
-    assert(duration >= 0);
-    assert(initial >= 0);
-    assert(nb_threads > 0);
-    assert(range > 0 && range >= initial);
-    assert(update >= 0 && update <= 100);
-		
-    printf("Set type     : skip list\n");
-    printf("Duration     : %d\n", duration);
-    printf("Initial size : %d\n", initial);
-    printf("Nb threads   : %d\n", nb_threads);
-    printf("Value range  : %ld\n", range);
-    printf("Seed         : %d\n", seed);
-    printf("Update rate  : %d\n", update);
-    printf("Lock alg.    : %d\n", unit_tx);
-    printf("Alternate    : %d\n", alternate);
-    printf("Effective    : %d\n", effective);
-    printf("Type sizes   : int=%d/long=%d/ptr=%d/word=%d\n",
-	   (int)sizeof(int),
-	   (int)sizeof(long),
-	   (int)sizeof(void *),
-	   (int)sizeof(uintptr_t));
-		
-    timeout.tv_sec = duration / 1000;
-    timeout.tv_nsec = (duration % 1000) * 1000000;
-		
-    data = (thread_data_t *)xmalloc(nb_threads * sizeof(thread_data_t));
-    threads = (pthread_t *)xmalloc(nb_threads * sizeof(pthread_t));
-		
-    if (seed == 0)
-      srand((int)time(0));
-    else
-      srand(seed);
-		
-    levelmax = floor_log_2((unsigned int) initial);
-    /* create the skip list set and do inits */
-    ptst_subsystem_init();
-    gc_subsystem_init();
-    set_subsystem_init();
+  }
+  
+  assert(duration >= 0);
+  assert(initial >= 0);
+  assert(nb_threads > 0);
+  assert(range > 0 && range >= initial);
+  assert(update >= 0 && update <= 100);
+  
+  printf("Set type     : skip list\n");
+  printf("Duration     : %d\n", duration);
+  printf("Initial size : %d\n", initial);
+  printf("Nb threads   : %d\n", nb_threads);
+  printf("Value range  : %ld\n", range);
+  printf("Seed         : %d\n", seed);
+  printf("Update rate  : %d\n", update);
+  printf("Lock alg.    : %d\n", unit_tx);
+  printf("Alternate    : %d\n", alternate);
+  printf("Effective    : %d\n", effective);
+  printf("Type sizes   : int=%d/long=%d/ptr=%d/word=%d\n",
+    (int)sizeof(int),
+    (int)sizeof(long),
+    (int)sizeof(void *),
+    (int)sizeof(uintptr_t));
+  
+  timeout.tv_sec = duration / 1000;
+  timeout.tv_nsec = (duration % 1000) * 1000000;
+  
+  data = (thread_data_t *)xmalloc(nb_threads * sizeof(thread_data_t));
+  pop_data = (population_data_t *)xmalloc(pop_par * sizeof(population_data_t));
+  threads = (pthread_t *)xmalloc(max(nb_threads, pop_par) * sizeof(pthread_t));
+  
+  if (seed == 0)
+    srand((int)time(0));
+  else
+    srand(seed);
+  
+  levelmax = floor_log_2((unsigned int) initial);
+  /* create the skip list set and do inits */
+  ptst_subsystem_init();
+  gc_subsystem_init();
+  set_subsystem_init();
 
 
-    ptst = ptst_critical_enter();
-    set = sl_set_new(ptst);
-    ptst_critical_exit(ptst);
-    stop = 0;
-		
-    global_seed = rand();
+  ptst = ptst_critical_enter();
+  set = sl_set_new(ptst);
+  ptst_critical_exit(ptst);
+  stop = 0;
+  
+  global_seed = rand();
 #ifdef TLS
-    rng_seed = &global_seed;
+  rng_seed = &global_seed;
 #else /* ! TLS */
-    if (pthread_key_create(&rng_seed_key, NULL) != 0) {
-      fprintf(stderr, "Error creating thread local\n");
-      exit(1);
-    }
-    pthread_setspecific(rng_seed_key, &global_seed);
+  if (pthread_key_create(&rng_seed_key, NULL) != 0) {
+    fprintf(stderr, "Error creating thread local\n");
+    exit(1);
+  }
+  pthread_setspecific(rng_seed_key, &global_seed);
 #endif /* ! TLS */
-		
-    /* Init STM */
-    printf("Initializing STM\n");
-		
-    /* Init thread-specific data for preds and succs */
-    if (pthread_key_create(&preds_key, NULL) != 0) {
-      fprintf(stderr, "Error creating thread local\n");
-      exit(1);
-    }
-    if (pthread_key_create(&succs_key, NULL) != 0) {
-      fprintf(stderr, "Error creating thread local\n");
-      exit(1);
-    }
-    sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
-    pthread_setspecific(preds_key, preds);
-    pthread_setspecific(succs_key, succs);
-    /* Populate set */
-    printf("Adding %d entries to set\n", initial);
+  
+  /* Init STM */
+  printf("Initializing STM\n");
+  
+  /* Init thread-specific data for preds and succs */
+  if (pthread_key_create(&preds_key, NULL) != 0) {
+    fprintf(stderr, "Error creating thread local\n");
+    exit(1);
+  }
+  if (pthread_key_create(&succs_key, NULL) != 0) {
+    fprintf(stderr, "Error creating thread local\n");
+    exit(1);
+  }
+  sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
+  sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
+  pthread_setspecific(preds_key, preds);
+  pthread_setspecific(succs_key, succs);
+
+  /* Populate set */
+  printf("Adding %d entries to set\n", initial);
+  if (pop_par == 1 || initial < 1000000) {
     i = 0;
     while (i < initial) {
       val = rand_range_re(&global_seed, range);
       if (sl_add(set, val, 0)) {
-	last = val;
-	i++;
+        last = val;
+        i++;
       }
     }
-    size = sl_set_size(set);
-    printf("Set size     : %d\n", size);
-    printf("Level max    : %d\n", levelmax);
-		
-    /* Access set from all threads */
-    barrier_init(&barrier, nb_threads + 1);
+  }
+  else{
     pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE)
-
-    for (i = 0; i < nb_threads; i++) {
-      printf("Creating thread %d\n", i);
-      data[i].first = last;
-      data[i].range = range;
-      data[i].update = update;
-      data[i].unit_tx = unit_tx;
-      data[i].alternate = alternate;
-      data[i].effective = effective;
-      data[i].nb_add = 0;
-      data[i].nb_added = 0;
-      data[i].nb_remove = 0;
-      data[i].nb_removed = 0;
-      data[i].nb_contains = 0;
-      data[i].nb_found = 0;
-      data[i].nb_aborts = 0;
-      data[i].nb_aborts_locked_read = 0;
-      data[i].nb_aborts_locked_write = 0;
-      data[i].nb_aborts_validate_read = 0;
-      data[i].nb_aborts_validate_write = 0;
-      data[i].nb_aborts_validate_commit = 0;
-      data[i].nb_aborts_invalid_memory = 0;
-      data[i].max_retries = 0;
-      data[i].seed = rand();
-      data[i].set = set;
-      data[i].barrier = &barrier;
-        data[i].validation_txs = test_mode;
-        if (test_mode) {
-            data[i].first = i;
-            if (pthread_create(&threads[i], &attr, sanity_check, (void *)(&data[i])) != 0) {
-                fprintf(stderr, "Error creating thread\n");
-                exit(1);
-            }
-        }
-        else {
-            if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
-                fprintf(stderr, "Error creating thread\n");
-                exit(1);
-            }
-        }
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+    for (i=0; i<pop_par; i++) {
+      pop_data[i].lastp = (i==0) ? &last : NULL;
+      pop_data[i].range = range;
+      pop_data[i].set = set;
+      pop_data[i].to_populate = initial/pop_par;
+      if (pthread_create(&threads[i], &attr, set_populate, (void *)(&pop_data[i])) != 0) {
+        fprintf(stderr, "Error creating thread\n");
+        exit(1);
+      }
     }
     pthread_attr_destroy(&attr);
-		
-    /* Start threads */
-    barrier_cross(&barrier);
-		
-    printf("STARTING...\n");
-    gettimeofday(&start, NULL);
-    if (duration > 0) {
-      nanosleep(&timeout, NULL);
-    } else {
-      sigemptyset(&block_set);
-      sigsuspend(&block_set);
-    }
-		
-    /**********/
-    print_skiplist(set);
-      /*for (i=0; i<256; i++) {
-      val = rand_range_re(&global_seed, range);
-      printf("inserting %ld\n",val);
-      sl_add(set, val, 2);
-      print_skiplist(set);
-      printf("\n\n\n");
-      printf("removing %ld\n",val);
-      sl_remove(set, val, 2);
-      print_skiplist(set);
-      printf("\n\n\n");
-      }*/
-		
-#ifdef ICC
-    stop = 1;
-#else	
-    AO_store_full(&stop, 1);
-#endif /* ICC */
-		
-    gettimeofday(&end, NULL);
-    printf("STOPPING...\n");
-		
-    /* Wait for thread completion */
-    for (i = 0; i < nb_threads; i++) {
+    for (i = 0; i < pop_par; i++) {
       if (pthread_join(threads[i], NULL) != 0) {
-	fprintf(stderr, "Error waiting for thread completion\n");
-	exit(1);
+        fprintf(stderr, "Error waiting for thread completion\n");
+        exit(1);
       }
     }
+  }
+  size = sl_set_size(set);
+  printf("Set size     : %d\n", size);
+  printf("Level max    : %d\n", levelmax);
 
+  
+  
+
+
+  /* Access set from all threads */
+  barrier_init(&barrier, nb_threads + 1);
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+  for (i = 0; i < nb_threads; i++) {
+    printf("Creating thread %d\n", i);
+    data[i].first = last;
+    data[i].range = range;
+    data[i].update = update;
+    data[i].unit_tx = unit_tx;
+    data[i].alternate = alternate;
+    data[i].effective = effective;
+    data[i].nb_add = 0;
+    data[i].nb_added = 0;
+    data[i].nb_remove = 0;
+    data[i].nb_removed = 0;
+    data[i].nb_contains = 0;
+    data[i].nb_found = 0;
+    data[i].nb_aborts = 0;
+    data[i].nb_aborts_locked_read = 0;
+    data[i].nb_aborts_locked_write = 0;
+    data[i].nb_aborts_validate_read = 0;
+    data[i].nb_aborts_validate_write = 0;
+    data[i].nb_aborts_validate_commit = 0;
+    data[i].nb_aborts_invalid_memory = 0;
+    data[i].max_retries = 0;
+    data[i].seed = rand();
+    data[i].set = set;
+    data[i].barrier = &barrier;
+    data[i].validation_txs = test_mode;
     if (test_mode) {
-        printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
+        data[i].first = i;
+        if (pthread_create(&threads[i], &attr, sanity_check, (void *)(&data[i])) != 0) {
+            fprintf(stderr, "Error creating thread\n");
+            exit(1);
+        }
     }
     else {
-        duration = (end.tv_sec * 1000 + end.tv_usec / 1000) -
-                   (start.tv_sec * 1000 + start.tv_usec / 1000);
-        aborts = 0;
-        aborts_locked_read = 0;
-        aborts_locked_write = 0;
-        aborts_validate_read = 0;
-        aborts_validate_write = 0;
-        aborts_validate_commit = 0;
-        aborts_invalid_memory = 0;
-        reads = 0;
-        effreads = 0;
-        updates = 0;
-        effupds = 0;
-        max_retries = 0;
-        for (i = 0; i < nb_threads; i++) {
-            //      printf("Thread %d\n", i);
-            //      printf("  #add        : %lu\n", data[i].nb_add);
-            //      printf("    #added    : %lu\n", data[i].nb_added);
-            //      printf("  #remove     : %lu\n", data[i].nb_remove);
-            //      printf("    #removed  : %lu\n", data[i].nb_removed);
-            //      printf("  #contains   : %lu\n", data[i].nb_contains);
-            //      printf("  #found      : %lu\n", data[i].nb_found);
-            //      printf("  #aborts     : %lu\n", data[i].nb_aborts);
-            //      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
-            //      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
-            //      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
-            //      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
-            //      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
-            //      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
-            //      printf("  Max retries : %lu\n", data[i].max_retries);
-            aborts += data[i].nb_aborts;
-            aborts_locked_read += data[i].nb_aborts_locked_read;
-            aborts_locked_write += data[i].nb_aborts_locked_write;
-            aborts_validate_read += data[i].nb_aborts_validate_read;
-            aborts_validate_write += data[i].nb_aborts_validate_write;
-            aborts_validate_commit += data[i].nb_aborts_validate_commit;
-            aborts_invalid_memory += data[i].nb_aborts_invalid_memory;
-            reads += data[i].nb_contains;
-            effreads += data[i].nb_contains +
-                        (data[i].nb_add - data[i].nb_added) +
-                        (data[i].nb_remove - data[i].nb_removed);
-            updates += (data[i].nb_add + data[i].nb_remove);
-            effupds += data[i].nb_removed + data[i].nb_added;
-            size += data[i].nb_added - data[i].nb_removed;
-            if (max_retries < data[i].max_retries)
-                max_retries = data[i].max_retries;
+        if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
+            fprintf(stderr, "Error creating thread\n");
+            exit(1);
         }
-        printf("Set size      : %d (expected: %d)\n", sl_set_size(set), size);
-        printf("Duration      : %d (ms)\n", duration);
-        printf("#txs          : %lu (%f / s)\n", reads + updates,
-               (reads + updates) * 1000.0 / duration);
-
-        printf("#read txs     : ");
-        if (effective) {
-            printf("%lu (%f / s)\n", effreads, effreads * 1000.0 / duration);
-            printf("  #contains   : %lu (%f / s)\n", reads, reads * 1000.0 /
-                                                            duration);
-        } else printf("%lu (%f / s)\n", reads, reads * 1000.0 / duration);
-
-        printf("#eff. upd rate: %f \n", 100.0 * effupds / (effupds + effreads));
-
-        printf("#update txs   : ");
-        if (effective) {
-            printf("%lu (%f / s)\n", effupds, effupds * 1000.0 / duration);
-            printf("  #upd trials : %lu (%f / s)\n", updates, updates * 1000.0 /
-                                                              duration);
-        } else printf("%lu (%f / s)\n", updates, updates * 1000.0 / duration);
-
-        printf("#aborts       : %lu (%f / s)\n", aborts, aborts * 1000.0 /
-                                                         duration);
-        printf("  #lock-r     : %lu (%f / s)\n", aborts_locked_read,
-               aborts_locked_read * 1000.0 / duration);
-        printf("  #lock-w     : %lu (%f / s)\n", aborts_locked_write,
-               aborts_locked_write * 1000.0 / duration);
-        printf("  #val-r      : %lu (%f / s)\n", aborts_validate_read,
-               aborts_validate_read * 1000.0 / duration);
-        printf("  #val-w      : %lu (%f / s)\n", aborts_validate_write,
-               aborts_validate_write * 1000.0 / duration);
-        printf("  #val-c      : %lu (%f / s)\n", aborts_validate_commit,
-               aborts_validate_commit * 1000.0 / duration);
-        printf("  #inv-mem    : %lu (%f / s)\n", aborts_invalid_memory,
-               aborts_invalid_memory * 1000.0 / duration);
-        printf("Max retries   : %lu\n", max_retries);
     }
-		
-    gc_subsystem_destroy();
-
-    /* Delete set */
-    ptst = ptst_critical_enter();
-    sl_set_delete(set, ptst);
-    ptst_critical_exit(ptst);
-		
-#ifndef TLS
-    pthread_key_delete(rng_seed_key);
-#endif /* ! TLS */
-    pthread_key_delete(preds_key);
-    pthread_key_delete(succs_key);
-		
-    free(threads);
-    free(data);
-		
-    return 0;
   }
+  pthread_attr_destroy(&attr);
+  
+  /* Start threads */
+  barrier_cross(&barrier);
+  
+  printf("STARTING...\n");
+  gettimeofday(&start, NULL);
+  if (duration > 0) {
+    nanosleep(&timeout, NULL);
+  } else {
+    sigemptyset(&block_set);
+    sigsuspend(&block_set);
+  }
+  
+  /**********/
+  /*print_skiplist(set);
+    for (i=0; i<256; i++) {
+    val = rand_range_re(&global_seed, range);
+    printf("inserting %ld\n",val);
+    sl_add(set, val, 2);
+    print_skiplist(set);
+    printf("\n\n\n");
+    printf("removing %ld\n",val);
+    sl_remove(set, val, 2);
+    print_skiplist(set);
+    printf("\n\n\n");
+    }*/
+  
+#ifdef ICC
+  stop = 1;
+#else	
+  AO_store_full(&stop, 1);
+#endif /* ICC */
+  
+  gettimeofday(&end, NULL);
+  printf("STOPPING...\n");
+  
+  /* Wait for thread completion */
+  for (i = 0; i < nb_threads; i++) {
+    if (pthread_join(threads[i], NULL) != 0) {
+fprintf(stderr, "Error waiting for thread completion\n");
+exit(1);
+    }
+  }
+
+  if (test_mode) {
+      printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
+  }
+  else {
+      duration = (end.tv_sec * 1000 + end.tv_usec / 1000) -
+                  (start.tv_sec * 1000 + start.tv_usec / 1000);
+      aborts = 0;
+      aborts_locked_read = 0;
+      aborts_locked_write = 0;
+      aborts_validate_read = 0;
+      aborts_validate_write = 0;
+      aborts_validate_commit = 0;
+      aborts_invalid_memory = 0;
+      reads = 0;
+      effreads = 0;
+      updates = 0;
+      effupds = 0;
+      max_retries = 0;
+      for (i = 0; i < nb_threads; i++) {
+          //      printf("Thread %d\n", i);
+          //      printf("  #add        : %lu\n", data[i].nb_add);
+          //      printf("    #added    : %lu\n", data[i].nb_added);
+          //      printf("  #remove     : %lu\n", data[i].nb_remove);
+          //      printf("    #removed  : %lu\n", data[i].nb_removed);
+          //      printf("  #contains   : %lu\n", data[i].nb_contains);
+          //      printf("  #found      : %lu\n", data[i].nb_found);
+          //      printf("  #aborts     : %lu\n", data[i].nb_aborts);
+          //      printf("    #lock-r   : %lu\n", data[i].nb_aborts_locked_read);
+          //      printf("    #lock-w   : %lu\n", data[i].nb_aborts_locked_write);
+          //      printf("    #val-r    : %lu\n", data[i].nb_aborts_validate_read);
+          //      printf("    #val-w    : %lu\n", data[i].nb_aborts_validate_write);
+          //      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
+          //      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
+          //      printf("  Max retries : %lu\n", data[i].max_retries);
+          aborts += data[i].nb_aborts;
+          aborts_locked_read += data[i].nb_aborts_locked_read;
+          aborts_locked_write += data[i].nb_aborts_locked_write;
+          aborts_validate_read += data[i].nb_aborts_validate_read;
+          aborts_validate_write += data[i].nb_aborts_validate_write;
+          aborts_validate_commit += data[i].nb_aborts_validate_commit;
+          aborts_invalid_memory += data[i].nb_aborts_invalid_memory;
+          reads += data[i].nb_contains;
+          effreads += data[i].nb_contains +
+                      (data[i].nb_add - data[i].nb_added) +
+                      (data[i].nb_remove - data[i].nb_removed);
+          updates += (data[i].nb_add + data[i].nb_remove);
+          effupds += data[i].nb_removed + data[i].nb_added;
+          size += data[i].nb_added - data[i].nb_removed;
+          if (max_retries < data[i].max_retries)
+              max_retries = data[i].max_retries;
+      }
+      printf("Set size      : %d (expected: %d)\n", sl_set_size(set), size);
+      printf("Duration      : %d (ms)\n", duration);
+      printf("#txs          : %lu (%f / s)\n", reads + updates,
+              (reads + updates) * 1000.0 / duration);
+
+      printf("#read txs     : ");
+      if (effective) {
+          printf("%lu (%f / s)\n", effreads, effreads * 1000.0 / duration);
+          printf("  #contains   : %lu (%f / s)\n", reads, reads * 1000.0 /
+                                                          duration);
+      } else printf("%lu (%f / s)\n", reads, reads * 1000.0 / duration);
+
+      printf("#eff. upd rate: %f \n", 100.0 * effupds / (effupds + effreads));
+
+      printf("#update txs   : ");
+      if (effective) {
+          printf("%lu (%f / s)\n", effupds, effupds * 1000.0 / duration);
+          printf("  #upd trials : %lu (%f / s)\n", updates, updates * 1000.0 /
+                                                            duration);
+      } else printf("%lu (%f / s)\n", updates, updates * 1000.0 / duration);
+
+      printf("#aborts       : %lu (%f / s)\n", aborts, aborts * 1000.0 /
+                                                        duration);
+      printf("  #lock-r     : %lu (%f / s)\n", aborts_locked_read,
+              aborts_locked_read * 1000.0 / duration);
+      printf("  #lock-w     : %lu (%f / s)\n", aborts_locked_write,
+              aborts_locked_write * 1000.0 / duration);
+      printf("  #val-r      : %lu (%f / s)\n", aborts_validate_read,
+              aborts_validate_read * 1000.0 / duration);
+      printf("  #val-w      : %lu (%f / s)\n", aborts_validate_write,
+              aborts_validate_write * 1000.0 / duration);
+      printf("  #val-c      : %lu (%f / s)\n", aborts_validate_commit,
+              aborts_validate_commit * 1000.0 / duration);
+      printf("  #inv-mem    : %lu (%f / s)\n", aborts_invalid_memory,
+              aborts_invalid_memory * 1000.0 / duration);
+      printf("Max retries   : %lu\n", max_retries);
+  }
+  
+  gc_subsystem_destroy();
+
+  /* Delete set */
+  ptst = ptst_critical_enter();
+  sl_set_delete(set, ptst);
+  ptst_critical_exit(ptst);
+  
+#ifndef TLS
+  pthread_key_delete(rng_seed_key);
+#endif /* ! TLS */
+  pthread_key_delete(preds_key);
+  pthread_key_delete(succs_key);
+  
+  free(threads);
+  free(data);
+  
+  return 0;
+}
