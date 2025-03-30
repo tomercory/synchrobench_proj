@@ -573,7 +573,7 @@ int main(int argc, char **argv)
       }
     }
   }
-  else{
+  else {
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     for (i=0; i<pop_par; i++) {
