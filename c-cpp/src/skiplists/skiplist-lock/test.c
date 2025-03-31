@@ -144,12 +144,28 @@ void print_skiplist(sl_intset_t *set) {
     }
     arr[curr->toplevel-1]++;
     printf("\n");
-    curr = curr->next[0];
+    curr = curr->next_arr[0].next;
   } while (curr); 
   for (j=0; j<levelmax; j++)
     printf("%d nodes of level %d\n", arr[j], j);
 }
 
+void verify_skiplist(sl_intset_t *set) {
+  sl_node_t *curr, *next;
+  int i;
+  int maxlevel = set->head->toplevel;
+  for (i = (maxlevel - 1); i >= 0; i--) {
+    curr = set->head;
+    next = curr->next_arr[i].next;
+    while (next) {
+      if (curr->val > next->val){
+        printf("BAD: in level %d, node %lu precedes node %lu\n", i, curr->val, next->val);
+      }
+      curr = next;
+      next = curr->next_arr[i].next;
+    }
+  }
+}
 
 void *test(void *data) {
   int last = -1;
@@ -611,6 +627,7 @@ void* sanity_check(void *data) {
     }
 
     if (test_mode) {
+        verify_skiplist(set);
         printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
     }
     else {

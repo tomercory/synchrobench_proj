@@ -39,26 +39,57 @@ inline int ok_to_delete(sl_node_t *node, int found) {
  * original paper. A fast parameter has been added to speed-up the search 
  * so that the function quits as soon as the searched element is found.
  */
+/*
+* Foresight note - fast is not used here. This allows us to use succs[0] to check whether element was found.
+*/
+
 inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast) {
   int found, i;
-  sl_node_t *pred, *curr;
+  sl_node_t *curr, *next_p;
+  val_t next_v;
 	
   found = -1;
-  pred = set->head;
+  curr = set->head;
 	
-  for (i = (pred->toplevel - 1); i >= 0; i--) {
-    curr = pred->next[i];
-    while (val > curr->val) {
-      pred = curr;
-      curr = pred->next[i];
+  for (i = (curr->toplevel - 1); i >= 1; i--) {
+    // next_v = (i != 0) ? curr->next_arr[i].next_val : curr->next_arr[i].next->val;
+    next_v = curr->next_arr[i].next_val;
+    next_p = curr->next_arr[i].next;
+    
+    while (val > next_v) {
+      if (next_p->val >= val) { // overcome eager advancement that may be caused by Foresight
+        break;
+      }
+      curr = next_p;
+      next_v = (i != 0) ? curr->next_arr[i].next_val : curr->next_arr[i].next->val;
+      next_p = curr->next_arr[i].next;
     }
     if (preds != NULL) 
-      preds[i] = pred;
-    succs[i] = curr;
-    if (found == -1 && val == curr->val) {
+      preds[i] = curr;
+    succs[i] = next_p;
+    if (found == -1 && val == next_p->val) {
       found = i;
     }
   }
+  // to avoid a branch for computing next_v, take level 0 out of the loop
+  next_v = curr->next_arr[0].next->val;
+  next_p = curr->next_arr[0].next;
+  
+  while (val > next_v) {
+    curr = next_p;
+    next_v = curr->next_arr[0].next->val;
+    next_p = curr->next_arr[0].next;
+  }
+  if (preds != NULL) 
+    preds[0] = curr;
+  succs[0] = next_p;
+  if (val == next_p->val) {
+    if (found == -1) found = 0;
+  }
+  else { // avoid ficticious finding as a result of Foresight
+    found = -1;
+  }
+
   return found;
 }
 
@@ -115,9 +146,9 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     found = optimistic_search(set, val, preds, succs, 1);
     if (found != -1) {
       node_found = succs[found];
-      if (!node_found->marked) {
-	while (!node_found->fullylinked) {}
-	return 0;
+      if (!node_found->marked && node_found->val == val) {
+        while (!node_found->fullylinked) {}
+        return 0;
       }
       continue;
     }
@@ -127,24 +158,27 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     for (i = 0; valid && (i < toplevel); i++) {
       pred = preds[i];
       succ = succs[i];
+      while (succ->val < val){ // overcome premature descent that may be caused by Foresight
+        pred = succ;
+        succ = pred->next_arr[i].next;
+      }
       if (pred != prev_pred) {
-	if (LOCK(&pred->lock) != 0) 
-	  fprintf(stderr, "Error cannot lock pred->val:%ld\n", (long)pred->val);
-	highest_locked = i;
-	prev_pred = pred;
+        if (LOCK(&pred->lock) != 0) 
+          fprintf(stderr, "Error cannot lock pred->val:%ld\n", (long)pred->val);
+        highest_locked = i;
+        prev_pred = pred;
       }	
-			
+      
       valid = (!pred->marked && !succ->marked && 
-	       ((volatile sl_node_t*) pred->next[i] == 
-		(volatile sl_node_t*) succ));
+        ((volatile sl_node_t*) pred->next_arr[i].next == (volatile sl_node_t*) succ));
     }	
     if (!valid) {
       /* Unlock the predecessors before leaving */ 
       unlock_levels(preds, highest_locked, 11);
       if (backoff > 5000) {
-	timeout.tv_sec = backoff / 5000;
-	timeout.tv_nsec = (backoff % 5000) * 1000000;
-	nanosleep(&timeout, NULL);
+        timeout.tv_sec = backoff / 5000;
+        timeout.tv_nsec = (backoff % 5000) * 1000000;
+        nanosleep(&timeout, NULL);
       }
       backoff *= 2;
       continue;
@@ -153,9 +187,13 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     ptst_t *ptst = ptst_critical_enter();
     new_node = sl_new_simple_node(val, toplevel, 2, ptst);
     ptst_critical_exit(ptst);
+
     for (i = 0; i < toplevel; i++) {
-      new_node->next[i] = succs[i];
-      preds[i]->next[i] = new_node;
+      new_node->next_arr[i].next = succs[i];
+      new_node->next_arr[i].next_val = succs[i]->val;
+
+      preds[i]->next_arr[i].next = new_node;
+      preds[i]->next_arr[i].next_val = val;
     }
 		
     new_node->fullylinked = 1;
@@ -189,57 +227,64 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
     /* If not marked and ok to delete, then mark it */
     if (is_marked || (found != -1 && ok_to_delete(succs[found], found))) {	
       if (!is_marked) {
-	node_todel = succs[found];
-				
-	if (LOCK(&node_todel->lock) != 0) 
-	  fprintf(stderr, "Error cannot lock node_todel->val:%ld\n", 
-		  (long)node_todel->val);
-	toplevel = node_todel->toplevel;
-	/* Unless it has been marked meanwhile */
-	if (node_todel->marked) {
-	  if (UNLOCK(&node_todel->lock) != 0)
-	    fprintf(stderr, "Error cannot unlock node_todel->val:%ld\n", 
-		    (long)node_todel->val);
-	  return 0;
-	}
-	node_todel->marked = 1;
-	is_marked = 1;
+        node_todel = succs[found];
+              
+        if (LOCK(&node_todel->lock) != 0) 
+          fprintf(stderr, "Error cannot lock node_todel->val:%ld\n", 
+            (long)node_todel->val);
+        toplevel = node_todel->toplevel;
+        /* Unless it has been marked meanwhile */
+        if (node_todel->marked) {
+          if (UNLOCK(&node_todel->lock) != 0)
+            fprintf(stderr, "Error cannot unlock node_todel->val:%ld\n", 
+              (long)node_todel->val);
+          return 0;
+        }
+        node_todel->marked = 1;
+        is_marked = 1;
       }
       /* Physical deletion */
       highest_locked = -1;
       prev_pred = NULL;
       valid = 1;
       for (i = 0; valid && (i < toplevel); i++) {
-	pred = preds[i];
-	succ = succs[i];
-	if (pred != prev_pred) {
-	  LOCK(&pred->lock);
-	  highest_locked = i;
-	  prev_pred = pred;
-	}
-	valid = (!pred->marked && ((volatile sl_node_t*) pred->next[i] == 
-				   (volatile sl_node_t*)succ));
+        pred = preds[i];
+        succ = succs[i];
+        while (succ->val < val){ // overcome premature descent that may be caused by Foresight
+          pred = succ;
+          succ = pred->next_arr[i].next;
+        }
+        if (pred != prev_pred) {
+          LOCK(&pred->lock);
+          highest_locked = i;
+          prev_pred = pred;
+        }
+        valid = (!pred->marked && ((volatile sl_node_t*) pred->next_arr[i].next == 
+                (volatile sl_node_t*)succ));
       }
       if (!valid) {	
-	unlock_levels(preds, highest_locked, 21);
-	if (backoff > 5000) {
-	  timeout.tv_sec = backoff / 5000;
-	  timeout.tv_nsec = (backoff % 5000) / 1000000;
-	  nanosleep(&timeout, NULL);
-	}
-	backoff *= 2;
-	continue;
+        unlock_levels(preds, highest_locked, 21);
+        if (backoff > 5000) {
+          timeout.tv_sec = backoff / 5000;
+          timeout.tv_nsec = (backoff % 5000) / 1000000;
+          nanosleep(&timeout, NULL);
+        }
+        backoff *= 2;
+        continue;
       }
 			
-      for (i = (toplevel-1); i >= 0; i--) 
-	preds[i]->next[i] = node_todel->next[i];
+      for (i = (toplevel-1); i >= 0; i--){
+        preds[i]->next_arr[i].next_val = node_todel->next_arr[i].next_val;
+        preds[i]->next_arr[i].next = node_todel->next_arr[i].next;
+      }
       UNLOCK(&node_todel->lock);	
       unlock_levels(preds, highest_locked, 22);
       ptst_t *ptst = ptst_critical_enter();
       sl_delete_node(node_todel, ptst);
       ptst_critical_exit(ptst);
       return 1;
-    } else {
+    } 
+    else {
       return 0;
     }
   }
