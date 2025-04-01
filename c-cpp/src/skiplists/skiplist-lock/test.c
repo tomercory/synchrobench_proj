@@ -649,16 +649,11 @@ int main(int argc, char **argv)
     data[i].barrier = &barrier;
     data[i].validation_txs = test_mode;
     if (test_mode) {
-<<<<<<< HEAD
-        verify_skiplist(set);
-        printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
-=======
         data[i].first = i;
         if (pthread_create(&threads[i], &attr, sanity_check, (void *)(&data[i])) != 0) {
             fprintf(stderr, "Error creating thread\n");
             exit(1);
         }
->>>>>>> fc0b799... parallelize construction for skiplist-lock
     }
     else {
         if (pthread_create(&threads[i], &attr, test, (void *)(&data[i])) != 0) {
@@ -713,7 +708,8 @@ exit(1);
   }
 
   if (test_mode) {
-      printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
+    verify_skiplist(set);
+    printf("If no BAD messages were printed, all tests have passed. Otherwise... :(\n");
   }
   else {
       duration = (end.tv_sec * 1000 + end.tv_usec / 1000) -
