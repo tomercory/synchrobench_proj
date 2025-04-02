@@ -13,7 +13,7 @@ typedef void         *setval_t;
  */
 
 /* Fine for 2^NUM_LEVELS nodes. */
-#define NUM_LEVELS 20
+#define NUM_LEVELS 25 // if you change this, make sure to change MAX_SIZES in gc.c as well!!!
 
 
 /* Internal key values with special meanings. */
