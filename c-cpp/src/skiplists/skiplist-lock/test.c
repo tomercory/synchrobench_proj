@@ -563,7 +563,7 @@ int main(int argc, char **argv)
 
   /* Populate set */
   printf("Adding %d entries to set\n", initial);
-  if (pop_par == 1 || initial < 1000000) {
+  if (pop_par == 1 || initial < 100000) {
     i = 0;
     while (i < initial) {
       val = rand_range_re(&global_seed, range);
@@ -580,7 +580,7 @@ int main(int argc, char **argv)
       pop_data[i].lastp = (i==0) ? &last : NULL;
       pop_data[i].range = range;
       pop_data[i].set = set;
-      pop_data[i].to_populate = initial/pop_par;
+      pop_data[i].to_populate = initial/pop_par + ((i==0) ? (initial % pop_par) : 0);
       if (pthread_create(&threads[i], &attr, set_populate, (void *)(&pop_data[i])) != 0) {
         fprintf(stderr, "Error creating thread\n");
         exit(1);
