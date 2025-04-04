@@ -594,8 +594,8 @@ int main(int argc, char **argv)
       }
     }
   }
-  size = sl_set_size(set);
-  printf("Set size     : %d\n", size);
+  // size = sl_set_size(set);
+  // printf("Set size     : %d\n", size);
   printf("Level max    : %d\n", levelmax);
 
   
@@ -795,6 +795,7 @@ exit(1);
   
   free(threads);
   free(data);
+  free(pop_data);
   
   return 0;
 }
