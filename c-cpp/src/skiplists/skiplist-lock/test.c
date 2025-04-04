@@ -142,6 +142,7 @@ typedef struct thread_data {
   unsigned int seed;
   sl_intset_t *set;
   barrier_t *barrier;
+  CACHE_PAD(0); // avoid false sharing with other threads
 } thread_data_t;
 
 typedef struct population_data {

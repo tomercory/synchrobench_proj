@@ -39,6 +39,7 @@
  #include "set.h"
  #include "lockfree.h"
  #include "intset.h"
+ #include "portable_defns.h"
  
  #define DEFAULT_DURATION                10000
  #define DEFAULT_INITIAL                 256
@@ -186,6 +187,7 @@
 	 struct sl_set *set;
 	 barrier_t *barrier;
 	 unsigned long failures_because_contention;
+	 CACHE_PAD(0); // avoid false sharing with other threads
  } thread_data_t;
  
  typedef struct population_data {
