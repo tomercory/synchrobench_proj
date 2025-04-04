@@ -81,12 +81,12 @@ sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional, ptst_t
 	sl_node_t *node;
 	
     node = gc_alloc(ptst, gc_id[0]);
-    node->next = gc_alloc(ptst, gc_id[1]);
 	node->val = val;
 	node->toplevel = toplevel;
 	node->marked = 0;
 	node->fullylinked = 0;
 	INIT_LOCK(&node->lock);
+	// node->next is initialized in caller func
 	return node;
 }
 
@@ -162,6 +162,8 @@ int sl_set_size(sl_intset_t *set)
  */
 void set_subsystem_init(void)
 {
-        gc_id[0]  = gc_add_allocator(sizeof(sl_node_t));
-        gc_id[1]  = gc_add_allocator(levelmax * sizeof(sl_node_t *));
+	int i;
+	for (i = 0; i < MAX_SIZES ; i++) {
+		gc_id[0] = gc_add_allocator(sizeof(sl_node_t)+ i*sizeof(sl_node_t *));
+	}
 }
