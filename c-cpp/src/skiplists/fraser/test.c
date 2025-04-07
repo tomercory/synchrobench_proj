@@ -775,7 +775,7 @@
 			 if (max_retries < data[i].max_retries)
 				 max_retries = data[i].max_retries;
 		 }
-		 printf("Set size      : %lu (expected: %lu)\n", set_count(set), size);
+		 // printf("Set size      : %lu (expected: %lu)\n", set_count(set), size);
 		 printf("Duration      : %d (ms)\n", duration);
 		 printf("#txs          : %lu (%f / s)\n", reads + updates, (reads + updates) * 1000.0 / duration);
  
