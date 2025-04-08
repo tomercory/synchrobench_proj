@@ -30,8 +30,14 @@
 
 extern unsigned int levelmax;
 
-inline int ok_to_delete(sl_node_t *node, int found) {
-  return (node->fullylinked && ((node->toplevel-1) == found) && !node->marked);
+/*
+ * "A node found not in its top level was either not yet fully linked, or marked and partially unlinked,
+ * at some point when the thread traversed the list at that level.
+ * We could have continued with the remove operation, but the subsequent validation would fail."
+ * - A Simple Optimistic Skiplist Algorithm
+ */
+inline int ok_to_delete(sl_node_t *node/*, int found*/) {
+  return (node->fullylinked /*&& ((node->toplevel-1) == found) */&& !node->marked);
 }
 
 /*
@@ -67,9 +73,9 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
     if (preds != NULL) 
       preds[i] = curr;
     succs[i] = next_p;
-    if (found == -1 && val == next_p->val) {
-      found = i;
-    }
+    // if (found == -1 && val == next_p->val) {
+    //   found = i;
+    // }
   }
   // to avoid a branch for computing next_v, take level 0 out of the loop
   next_v = curr->next_arr[0].next->val;
@@ -84,11 +90,11 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
     preds[0] = curr;
   succs[0] = next_p;
   if (val == next_p->val) {
-    if (found == -1) found = 0;
+    /*if (found == -1)*/ found = 0;
   }
-  else { // avoid ficticious finding as a result of Foresight
-    found = -1;
-  }
+  // else { // avoid ficticious finding as a result of Foresight
+  //   found = -1;
+  // }
 
   return found;
 }
@@ -146,7 +152,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     found = optimistic_search(set, val, preds, succs, 1);
     if (found != -1) {
       node_found = succs[found];
-      if (!node_found->marked && node_found->val == val) {
+      if (!node_found->marked /* && node_found->val == val*/) {
         while (!node_found->fullylinked) {}
         return 0;
       }
@@ -225,7 +231,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
   while(1) {
     found = optimistic_search(set, val, preds, succs, 1);
     /* If not marked and ok to delete, then mark it */
-    if (is_marked || (found != -1 && ok_to_delete(succs[found], found))) {	
+    if (is_marked || (found != -1 && ok_to_delete(succs[found]/*, found*/))) {	
       if (!is_marked) {
         node_todel = succs[found];
               
