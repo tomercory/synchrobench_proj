@@ -142,6 +142,7 @@ typedef struct thread_data {
   unsigned int seed;
   sl_intset_t *set;
   barrier_t *barrier;
+  CACHE_PAD(0); // avoid false sharing with other threads
 } thread_data_t;
 
 typedef struct population_data {
@@ -579,7 +580,7 @@ int main(int argc, char **argv)
 
   /* Populate set */
   printf("Adding %d entries to set\n", initial);
-  if (pop_par == 1 || initial < 1000000) {
+  if (pop_par == 1 || initial < 100000) {
     i = 0;
     while (i < initial) {
       val = rand_range_re(&global_seed, range);
@@ -596,7 +597,7 @@ int main(int argc, char **argv)
       pop_data[i].lastp = (i==0) ? &last : NULL;
       pop_data[i].range = range;
       pop_data[i].set = set;
-      pop_data[i].to_populate = initial/pop_par;
+      pop_data[i].to_populate = initial/pop_par + ((i==0) ? (initial % pop_par) : 0);
       if (pthread_create(&threads[i], &attr, set_populate, (void *)(&pop_data[i])) != 0) {
         fprintf(stderr, "Error creating thread\n");
         exit(1);
@@ -610,8 +611,8 @@ int main(int argc, char **argv)
       }
     }
   }
-  size = sl_set_size(set);
-  printf("Set size     : %d\n", size);
+  // size = sl_set_size(set);
+  // printf("Set size     : %d\n", size);
   printf("Level max    : %d\n", levelmax);
 
   
@@ -759,7 +760,7 @@ exit(1);
           if (max_retries < data[i].max_retries)
               max_retries = data[i].max_retries;
       }
-      printf("Set size      : %d (expected: %d)\n", sl_set_size(set), size);
+      // printf("Set size      : %d (expected: %d)\n", sl_set_size(set), size);
       printf("Duration      : %d (ms)\n", duration);
       printf("#txs          : %lu (%f / s)\n", reads + updates,
               (reads + updates) * 1000.0 / duration);
@@ -812,6 +813,7 @@ exit(1);
   
   free(threads);
   free(data);
-  
+  free(pop_data);
+
   return 0;
 }
