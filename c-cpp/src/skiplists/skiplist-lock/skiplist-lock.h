@@ -41,7 +41,7 @@
  * number of unique blk sizes we want to deal with
  * (1 for node and 1 for next pointer array)
  */
-#define MAX_SIZES 2
+#define MAX_SIZES 25
 
 
 
@@ -88,10 +88,11 @@ typedef struct sl_next_entry {
 typedef struct sl_node {
 	val_t val; 
 	int toplevel;
-    sl_next_entry_t* next_arr; // Pointer to an array of `sl_next_entry_t`
+	//sl_next_entry_t* next_arr;
 	volatile int marked;
 	volatile int fullylinked;
 	ptlock_t lock;	
+	sl_next_entry_t next_arr[1];
 } sl_node_t;
 
 typedef struct sl_intset {
