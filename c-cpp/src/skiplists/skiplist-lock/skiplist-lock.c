@@ -80,8 +80,7 @@ sl_node_t *sl_new_simple_node(val_t val, int toplevel, int transactional, ptst_t
 {
 	sl_node_t *node;
 	
-    node = gc_alloc(ptst, gc_id[0]);
-    node->next_arr = gc_alloc(ptst, gc_id[1]);
+    node = gc_alloc(ptst, gc_id[toplevel-1]);
 	node->val = val;
 	node->toplevel = toplevel;
 	node->marked = 0;
@@ -111,8 +110,7 @@ sl_node_t *sl_new_node(val_t val, sl_node_t *next, int toplevel, int transaction
 void sl_delete_node(sl_node_t *n, ptst_t *ptst)
 {
 	DESTROY_LOCK(&n->lock);
-    gc_free(ptst, (void*)n->next_arr, gc_id[1]);
-    gc_free(ptst, (void*)n, gc_id[0]);
+    gc_free(ptst, (void*)n, gc_id[n->toplevel-1]);
 }
 
 sl_intset_t *sl_set_new(ptst_t *ptst)
@@ -163,6 +161,8 @@ int sl_set_size(sl_intset_t *set)
  */
 void set_subsystem_init(void)
 {
-        gc_id[0]  = gc_add_allocator(sizeof(sl_node_t));
-        gc_id[1]  = gc_add_allocator(levelmax * sizeof(sl_next_entry_t));
+	int i;
+	for (i = 0; i < MAX_SIZES ; i++) {
+		gc_id[i] = gc_add_allocator(sizeof(sl_node_t)+ i*sizeof(sl_next_entry_t));
+	}
 }
