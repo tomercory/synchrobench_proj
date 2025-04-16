@@ -167,6 +167,8 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
       while (succ->val < val){ // overcome premature descent that may be caused by Foresight
         pred = succ;
         succ = pred->next_arr[i].next;
+        preds[i] = pred;
+        succs[i] = succ;
       }
       if (pred != prev_pred) {
         if (LOCK(&pred->lock) != 0) 
@@ -259,6 +261,8 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
         while (succ->val < val){ // overcome premature descent that may be caused by Foresight
           pred = succ;
           succ = pred->next_arr[i].next;
+          preds[i] = pred;
+          // succs[i] = succ; // unused from here on, no need to update
         }
         if (pred != prev_pred) {
           LOCK(&pred->lock);
