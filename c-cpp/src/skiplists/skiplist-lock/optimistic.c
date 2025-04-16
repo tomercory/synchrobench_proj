@@ -58,7 +58,6 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
   curr = set->head;
 	
   for (i = (curr->toplevel - 1); i >= 1; i--) {
-    // next_v = (i != 0) ? curr->next_arr[i].next_val : curr->next_arr[i].next->val;
     next_v = curr->next_arr[i].next_val;
     next_p = curr->next_arr[i].next;
     
@@ -67,7 +66,7 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
         break;
       }
       curr = next_p;
-      next_v = (i != 0) ? curr->next_arr[i].next_val : curr->next_arr[i].next->val;
+      next_v = curr->next_arr[i].next_val;
       next_p = curr->next_arr[i].next;
     }
     if (preds != NULL) 
