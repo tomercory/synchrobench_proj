@@ -115,7 +115,7 @@ int optimistic_find(sl_intset_t *set, val_t val) {
 }
 
 /*
- * Function unlock_levels is an helper function for the insert and delete 
+ * Function unlock_levels is a helper function for the insert and delete 
  * functions.
  */ 
 inline void unlock_levels(sl_node_t **nodes, int highestlevel, int j) {
@@ -203,6 +203,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
       new_node->next_arr[i-1].next_val = succs[i]->val;
 
       preds[i]->next_arr[i].next = new_node;
+      asm volatile("" ::: "memory");
       preds[i]->next_arr[i-1].next_val = val;
     }
 		
@@ -220,7 +221,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
  */
 int optimistic_delete(sl_intset_t *set, val_t val) {
   sl_node_t *node_todel, *prev_pred; 
-  sl_node_t *pred, *succ;
+  sl_node_t *pred;
   sl_node_t **preds = pthread_getspecific(preds_key);
   sl_node_t **succs = pthread_getspecific(succs_key);
   int is_marked, toplevel, highest_locked, i, valid, found;	
@@ -259,12 +260,9 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
       valid = 1;
       for (i = 0; valid && (i < toplevel); i++) {
         pred = preds[i];
-        succ = succs[i];
-        while (succ->val < val){ // overcome premature descent that may be caused by Foresight
-          pred = succ;
-          succ = pred->next_arr[i].next;
+        while (pred->next_arr[i].next != node_todel && pred->next_arr[i].next != NULL){ // overcome premature descent that may be caused by Foresight
+          pred = pred->next_arr[i].next;
           preds[i] = pred;
-          // succs[i] = succ; // unused from here on, no need to update
         }
         if (pred != prev_pred) {
           LOCK(&pred->lock);
@@ -272,7 +270,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
           prev_pred = pred;
         }
         valid = (!pred->marked && ((volatile sl_node_t*) pred->next_arr[i].next == 
-                (volatile sl_node_t*)succ));
+                (volatile sl_node_t*)node_todel));
       }
       if (!valid) {	
         unlock_levels(preds, highest_locked, 21);
@@ -287,6 +285,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 			
       for (i = (toplevel-1); i >= 0; i--){
         preds[i]->next_arr[i-1].next_val = node_todel->next_arr[i-1].next_val;
+        asm volatile("" ::: "memory");
         preds[i]->next_arr[i].next = node_todel->next_arr[i].next;
       }
       UNLOCK(&node_todel->lock);	
