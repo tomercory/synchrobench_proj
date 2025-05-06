@@ -101,9 +101,9 @@ sl_node_t *sl_new_node(val_t val, sl_node_t *next, int toplevel, int transaction
 	node = sl_new_simple_node(val, toplevel, transactional, ptst);
 	
 	sl_next_entry_t next_entry = { .next = next, .next_val = (next != NULL ? next->val : VAL_MAX) };
-	for (i = 0; i < toplevel; i++)
+	for (i = 0; i < toplevel-1; i++)
 		node->next_arr[i] = next_entry;
-	
+	node->next_arr[toplevel-1].next = next;
 	return node;
 }
 
@@ -163,6 +163,6 @@ void set_subsystem_init(void)
 {
 	int i;
 	for (i = 0; i < MAX_SIZES ; i++) {
-		gc_id[i] = gc_add_allocator(sizeof(sl_node_t)+ i*sizeof(sl_next_entry_t));
+		gc_id[i] = gc_add_allocator(sizeof(sl_node_t)+ i*sizeof(sl_next_entry_t) - sizeof(val_t));
 	}
 }

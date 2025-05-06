@@ -58,7 +58,7 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
   curr = set->head;
 	
   for (i = (curr->toplevel - 1); i >= 1; i--) {
-    next_v = curr->next_arr[i].next_val;
+    next_v = curr->next_arr[i-1].next_val;
     next_p = curr->next_arr[i].next;
     
     while (val > next_v) {
@@ -66,7 +66,7 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
         break;
       }
       curr = next_p;
-      next_v = curr->next_arr[i].next_val;
+      next_v = curr->next_arr[i-1].next_val;
       next_p = curr->next_arr[i].next;
     }
     if (preds != NULL) 
@@ -145,6 +145,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
   struct timespec timeout;
 
   toplevel = get_rand_level();
+  //printf("adding node of lvl %d\n", toplevel);
   backoff = 1;
 	
   while (1) {
@@ -195,12 +196,14 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     new_node = sl_new_simple_node(val, toplevel, 2, ptst);
     ptst_critical_exit(ptst);
 
-    for (i = 0; i < toplevel; i++) {
+    new_node->next_arr[0].next = succs[0];
+    preds[0]->next_arr[0].next = new_node;
+    for (i = 1; i < toplevel; i++) {
       new_node->next_arr[i].next = succs[i];
-      new_node->next_arr[i].next_val = succs[i]->val;
+      new_node->next_arr[i-1].next_val = succs[i]->val;
 
       preds[i]->next_arr[i].next = new_node;
-      preds[i]->next_arr[i].next_val = val;
+      preds[i]->next_arr[i-1].next_val = val;
     }
 		
     new_node->fullylinked = 1;
@@ -283,7 +286,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
       }
 			
       for (i = (toplevel-1); i >= 0; i--){
-        preds[i]->next_arr[i].next_val = node_todel->next_arr[i].next_val;
+        preds[i]->next_arr[i-1].next_val = node_todel->next_arr[i-1].next_val;
         preds[i]->next_arr[i].next = node_todel->next_arr[i].next;
       }
       UNLOCK(&node_todel->lock);	
