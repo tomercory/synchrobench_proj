@@ -27,17 +27,17 @@
 
 #define MAXLEVEL    32
 
-int sl_contains_old(set_t *set, unsigned int key, int transactional)
+int sl_contains_old(set_t *set, unsigned int key, int transactional, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes)
 {
-        return sl_contains(set, (sl_key_t) key);
+        return sl_contains(set, (sl_key_t) key, invariant_ptr_checks, invariant_ptr_changes);
 }
 
-int sl_add_old(set_t *set, unsigned int key, int transactional)
+int sl_add_old(set_t *set, unsigned int key, int transactional, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes)
 {
-        return sl_insert(set, (sl_key_t) key, (val_t) ((long)key));
+        return sl_insert(set, (sl_key_t) key, (val_t) ((long)key), invariant_ptr_checks, invariant_ptr_changes);
 }
 
-int sl_remove_old(set_t *set, unsigned int key, int transactional)
+int sl_remove_old(set_t *set, unsigned int key, int transactional, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes)
 {
-	return sl_delete(set, (sl_key_t) key);
+	return sl_delete(set, (sl_key_t) key, invariant_ptr_checks, invariant_ptr_changes);
 }

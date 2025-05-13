@@ -17,11 +17,18 @@ enum sl_optype {
         INSERT
 };
 
-int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val);
+int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes);
 
 /* these are macros instead of functions to improve performance */
-#define sl_contains(a, b) sl_do_operation((a), CONTAINS, (b), NULL);
-#define sl_delete(a, b) sl_do_operation((a), DELETE, (b), NULL);
-#define sl_insert(a, b, c) sl_do_operation((a), INSERT, (b), (c));
+#define sl_contains(a, b, c, d) sl_do_operation((a), CONTAINS, (b), NULL, (c), (d));
+#define sl_delete(a, b, c, d) sl_do_operation((a), DELETE, (b), NULL, (c), (d));
+#define sl_insert(a, b, c, d, e) sl_do_operation((a), INSERT, (b), (c), (d), (e));
+
+// int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val);
+
+// /* these are macros instead of functions to improve performance */
+// #define sl_contains(a, b) sl_do_operation((a), CONTAINS, (b), NULL);
+// #define sl_delete(a, b) sl_do_operation((a), DELETE, (b), NULL);
+// #define sl_insert(a, b, c) sl_do_operation((a), INSERT, (b), (c));
 
 #endif /* NOHOTSPOT_OPS_H_ */

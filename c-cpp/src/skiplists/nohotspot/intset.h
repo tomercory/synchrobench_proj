@@ -26,8 +26,8 @@
 
 #include "skiplist.h"
 
-int sl_contains_old(set_t *set, unsigned int key, int transactional);
-int sl_add_old(set_t *set, unsigned int key, int transactional);
-int sl_remove_old(set_t *set, unsigned int key, int transactional);
+int sl_contains_old(set_t *set, unsigned int key, int transactional, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes);
+int sl_add_old(set_t *set, unsigned int key, int transactional, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes);
+int sl_remove_old(set_t *set, unsigned int key, int transactional, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes);
 
 #endif /* INTSET_H_ */
