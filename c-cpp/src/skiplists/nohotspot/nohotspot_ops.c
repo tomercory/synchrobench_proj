@@ -198,7 +198,7 @@ static int sl_finish_insert(sl_key_t key, val_t val, node_t *node,
  * Returns the result of the operation.
  * Note: @val can be NULL. 
  */
-int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val, unsigned long* invariant_ptr_checks, unsigned long* invariant_ptr_changes)
+int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val)
 {
         inode_t *item = NULL, *next_item = NULL;
         node_t *node = NULL, *next = NULL;
@@ -312,13 +312,11 @@ int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val, uns
                }
            }
 
-           if (invariant_ptr_checks != NULL) *invariant_ptr_checks += 1;
            if (next_item != (volatile inode_t*)(item->right.right_p) /*|| next_key != (volatile inode_t*) item->right.right_k*/) {
                 /* if the condition above holds, next_item has changed since reading next_key, putting the invariant at risk.
                  In such cases, forego foresight and traditionally check next_key.
                  Alternatively, could just continue, but this would hurt wait-freedom of contains.
                 */
-               if (invariant_ptr_changes != NULL) *invariant_ptr_changes += 1;
                if (next_item->node->key > key) {
                    item = item->down;
                    continue;
