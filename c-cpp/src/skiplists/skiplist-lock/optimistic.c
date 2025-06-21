@@ -58,16 +58,24 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
   curr = set->head;
 	
   for (i = (curr->toplevel - 1); i >= 1; i--) {
-    next_v = curr->next_arr[i-1].next_val;
     next_p = curr->next_arr[i].next;
+    asm volatile("" ::: "memory");  
+    next_v = curr->next_arr[i-1].next->val;
+    asm volatile("" ::: "memory");  
+    if (next_p!=(volatile sl_node_t*)curr->next_arr[i].next)
+      next_v = next_p->val;
     
     while (val > next_v) {
-      if (next_p->val >= val) { // overcome eager advancement that may be caused by Foresight
+      if (next_p->val >= val) { // overcome reckless advancement that may be caused by Foresight (validate-goback)
         break;
       }
       curr = next_p;
-      next_v = curr->next_arr[i-1].next_val;
       next_p = curr->next_arr[i].next;
+      asm volatile("" ::: "memory");  
+      next_v = curr->next_arr[i-1].next->val;
+      asm volatile("" ::: "memory");  
+      if (next_p!=(volatile sl_node_t*)curr->next_arr[i].next)
+        next_v = next_p->val;
     }
     if (preds != NULL) 
       preds[i] = curr;
@@ -82,8 +90,8 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
   
   while (val > next_v) {
     curr = next_p;
-    next_v = curr->next_arr[0].next->val;
     next_p = curr->next_arr[0].next;
+    next_v = curr->next_arr[0].next->val;
   }
   if (preds != NULL) 
     preds[0] = curr;
@@ -164,12 +172,12 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     for (i = 0; valid && (i < toplevel); i++) {
       pred = preds[i];
       succ = succs[i];
-      while (succ->val < val){ // overcome premature descent that may be caused by Foresight
-        pred = succ;
-        succ = pred->next_arr[i].next;
-        preds[i] = pred;
-        succs[i] = succ;
-      }
+      // while (succ->val < val){ // overcome premature descent that may be caused by Foresight
+      //   pred = succ;
+      //   succ = pred->next_arr[i].next;
+      //   preds[i] = pred;
+      //   succs[i] = succ;
+      // }
       if (pred != prev_pred) {
         if (LOCK(&pred->lock) != 0) 
           fprintf(stderr, "Error cannot lock pred->val:%ld\n", (long)pred->val);
@@ -202,9 +210,9 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
       new_node->next_arr[i].next = succs[i];
       new_node->next_arr[i-1].next_val = succs[i]->val;
 
-      preds[i]->next_arr[i].next = new_node;
-      asm volatile("" ::: "memory");
-      preds[i]->next_arr[i-1].next_val = val;
+      preds[i]->next_arr[i-1].next_val = val; // overcome
+      asm volatile("" ::: "memory");          // premature descent
+      preds[i]->next_arr[i].next = new_node;  // through invariant
     }
 		
     new_node->fullylinked = 1;
@@ -224,6 +232,8 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
   sl_node_t *pred;
   sl_node_t **preds = pthread_getspecific(preds_key);
   sl_node_t **succs = pthread_getspecific(succs_key);
+  sl_node_t *nextp;
+  val_t nextv;
   int is_marked, toplevel, highest_locked, i, valid, found;	
   unsigned int backoff;
   struct timespec timeout;
@@ -260,10 +270,10 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
       valid = 1;
       for (i = 0; valid && (i < toplevel); i++) {
         pred = preds[i];
-        while (pred->next_arr[i].next != node_todel && pred->next_arr[i].next != NULL){ // overcome premature descent that may be caused by Foresight
-          pred = pred->next_arr[i].next;
-          preds[i] = pred;
-        }
+        // while (pred->next_arr[i].next != node_todel && pred->next_arr[i].next != NULL){ // overcome premature descent that may be caused by Foresight
+        //   pred = pred->next_arr[i].next;
+        //   preds[i] = pred;
+        // }
         if (pred != prev_pred) {
           LOCK(&pred->lock);
           highest_locked = i;
@@ -284,9 +294,12 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
       }
 			
       for (i = (toplevel-1); i >= 0; i--){
-        preds[i]->next_arr[i-1].next_val = node_todel->next_arr[i-1].next_val;
-        asm volatile("" ::: "memory");
-        preds[i]->next_arr[i].next = node_todel->next_arr[i].next;
+        nextp = node_todel->next_arr[i].next;
+        nextv = node_todel->next_arr[i-1].next_val;
+
+        preds[i]->next_arr[i].next = nextp;              // overcome
+        asm volatile("" ::: "memory");                   // premature descent
+        preds[i]->next_arr[i-1].next_val = nextv;        // through invariant
       }
       UNLOCK(&node_todel->lock);	
       unlock_levels(preds, highest_locked, 22);
