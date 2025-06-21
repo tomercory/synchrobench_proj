@@ -54,7 +54,7 @@
  #define DEFAULT_TEST                    0
  #define DEFAULT_PARALLELISM             1
  
- #define LOG2NUMTHREADS 					7
+ #define LOG2NUMTHREADS 					8
  
  #define XSTR(s)                         STR(s)
  #define STR(s)                          #s
