@@ -331,16 +331,23 @@
 	 barrier_cross(d->barrier);
 	 for (i=0; i<d->validation_txs; ++i){
 		key = (rand_range_re(&d->seed, d->range)<<LOG2NUMTHREADS) + lsb;
-		if (key == 0) continue;
+		// if (key == 0) continue; // not necessary here
 		if (!sl_contains_old(d->set, key)){
 			if(sl_remove_old(d->set, key)) 
 				printf("BAD: managed to remove non-existent key %lu\n", key);
-		}
-		if(!sl_add_old(d->set, key)) printf("BAD: failed to update key %lu\n", key);
-		if(!sl_contains_old(d->set, key)) printf("BAD: failed to find key %lu after insertion \n", key);
-		if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
-			if(!sl_remove_old(d->set, key)) printf("BAD: failed to remove key %lu after insertion \n", key);
-			if(sl_contains_old(d->set, key)) printf("BAD: managed to find key %lu after removal \n", key);
+			if(!sl_add_old(d->set, key)) printf("BAD: failed to insert non-existent key %lu\n", key);
+			if(!sl_contains_old(d->set, key)) printf("BAD: failed to find key %lu after insertion \n", key);
+			if(sl_add_old(d->set, key)) printf("BAD: managed to insert an already existent key %lu\n", key);
+			if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+				if(!sl_remove_old(d->set, key)) printf("BAD: failed to remove key %lu after insertion \n", key);
+				if(sl_contains_old(d->set, key)) printf("BAD: managed to find key %lu after removal \n", key);
+			}
+		} else{
+			if(sl_add_old(d->set, key)) printf("BAD insert contained key %lu\n", key);
+			if(rand_range_re(&d->seed, d->range)%8){ // i.e., with probability ~ 0.875
+				if(!sl_remove_old(d->set, key)) printf("BAD: failed to remove existing key %lu \n", key);
+				if(sl_contains_old(d->set, key)) printf("BAD: managed to find key %lu after removal \n", key);
+			}
 		}
 	 }
 	 printf("Thread %d local test done\n", lsb);
