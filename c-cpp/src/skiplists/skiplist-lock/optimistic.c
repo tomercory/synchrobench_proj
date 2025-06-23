@@ -164,12 +164,12 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     for (i = 0; valid && (i < toplevel); i++) {
       pred = preds[i];
       succ = succs[i];
-      while (succ->val < val){ // overcome premature descent that may be caused by Foresight
-        pred = succ;
-        succ = pred->next_arr[i].next;
-        preds[i] = pred;
-        succs[i] = succ;
-      }
+      // while (succ->val < val){ // overcome premature descent that may be caused by Foresight
+      //   pred = succ;
+      //   succ = pred->next_arr[i].next;
+      //   preds[i] = pred;
+      //   succs[i] = succ;
+      // }
       if (pred != prev_pred) {
         if (LOCK(&pred->lock) != 0) 
           fprintf(stderr, "Error cannot lock pred->val:%ld\n", (long)pred->val);
@@ -177,7 +177,7 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
         prev_pred = pred;
       }	
       
-      valid = (!pred->marked && !succ->marked && 
+      valid = (!pred->marked && !succ->marked && succ->val >= val && // add succ->val >= val validation to retry in case of premature descent
         ((volatile sl_node_t*) pred->next_arr[i].next == (volatile sl_node_t*) succ));
     }	
     if (!valid) {
@@ -260,19 +260,19 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
       for (i = 0; valid && (i < toplevel); i++) {
         pred = preds[i];
         succ = succs[i];
-        while (succ->val < val){ // overcome premature descent that may be caused by Foresight
-          pred = succ;
-          succ = pred->next_arr[i].next;
-          preds[i] = pred;
-          // succs[i] = succ; // unused from here on, no need to update
-        }
+        // while (succ->val < val){ // overcome premature descent that may be caused by Foresight
+        //   pred = succ;
+        //   succ = pred->next_arr[i].next;
+        //   preds[i] = pred;
+        //   // succs[i] = succ; // unused from here on, no need to update
+        // }
         if (pred != prev_pred) {
           LOCK(&pred->lock);
           highest_locked = i;
           prev_pred = pred;
         }
-        valid = (!pred->marked && ((volatile sl_node_t*) pred->next_arr[i].next == 
-                (volatile sl_node_t*)succ));
+        valid = (!pred->marked && succ->val >= val && // add succ->val >= val validation to retry in case of premature descent
+                ((volatile sl_node_t*) pred->next_arr[i].next == (volatile sl_node_t*)succ));
       }
       if (!valid) {	
         unlock_levels(preds, highest_locked, 21);
