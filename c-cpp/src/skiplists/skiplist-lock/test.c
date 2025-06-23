@@ -34,7 +34,7 @@ pthread_key_t rng_seed_key;
 #endif /* ! TLS */
 unsigned int levelmax;
 
-#define LOG2NUMTHREADS 7
+#define LOG2NUMTHREADS 8
 #define DEFAULT_DURATION                10000
 #define DEFAULT_INITIAL                 256
 #define DEFAULT_NB_THREADS              1
