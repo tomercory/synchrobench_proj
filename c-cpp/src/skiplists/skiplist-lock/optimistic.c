@@ -38,15 +38,13 @@ inline int ok_to_delete(sl_node_t *node, int found) {
 inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast) {
   int found, i;
   sl_node_t *curr;
-  _Alignas(16) volatile sl_next_entry_t local_next_pv;
+  volatile sl_next_entry_t local_next_pv;
 
   found = -1;
   curr = set->head;
 	
   for (i = (curr->toplevel - 1); i >= 0; i--) {
-    asm volatile("" ::: "memory");
-    read_16_bytes_atomic((volatile const __m128i*)&(curr->next_arr[i]), (volatile __m128i*) &local_next_pv);
-    asm volatile("" ::: "memory");
+    read_16_bytes_atomic((const __m128i*)&(curr->next_arr[i]), (__m128i*) &local_next_pv);
     // // debugging
     // if (local_next_pv.next != NULL){
     //   if (local_next_pv.next_val != local_next_pv.next->val){
@@ -56,9 +54,7 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
     // //
     while (val > local_next_pv.next_val) {
         curr = local_next_pv.next;
-        asm volatile("" ::: "memory");
-        read_16_bytes_atomic((volatile const __m128i*)&(curr->next_arr[i]), (volatile __m128i*) &local_next_pv);
-        asm volatile("" ::: "memory");
+        read_16_bytes_atomic((const __m128i*)&(curr->next_arr[i]), (__m128i*) &local_next_pv);
         // // debugging
         // if (local_next_pv.next != NULL){
         //   if (local_next_pv.next_val != local_next_pv.next->val){
@@ -167,13 +163,11 @@ int optimistic_insert(sl_intset_t *set, val_t val) {
     ptst_t *ptst = ptst_critical_enter();
     new_node = sl_new_simple_node(val, toplevel, 2, ptst);
     ptst_critical_exit(ptst);
-    volatile _Alignas(16) sl_next_entry_t local_pv = {new_node, new_node->val};
+    volatile sl_next_entry_t local_pv = {new_node, new_node->val};
     for (i = 0; i < toplevel; i++) {
       new_node->next_arr[i].next = succs[i];
       new_node->next_arr[i].next_val = succs[i]->val;
-      asm volatile("" ::: "memory");
-      write_16_bytes_atomic((volatile __m128i*)&(preds[i]->next_arr[i]), (volatile const __m128i*)&local_pv);
-      asm volatile("" ::: "memory");
+      write_16_bytes_atomic((__m128i*)&(preds[i]->next_arr[i]), (const __m128i*)&local_pv);
     }
 		
     new_node->fullylinked = 1;
@@ -249,9 +243,7 @@ int optimistic_delete(sl_intset_t *set, val_t val) {
 	continue;
       }
       for (i = (toplevel-1); i >= 0; i--) {
-        asm volatile("" ::: "memory");
-        write_16_bytes_atomic((volatile __m128i*)&(preds[i]->next_arr[i]), (volatile const __m128i*)&(node_todel->next_arr[i]));
-        asm volatile("" ::: "memory");
+        write_16_bytes_atomic((__m128i*)&(preds[i]->next_arr[i]), (const __m128i*)&(node_todel->next_arr[i]));
       }
       UNLOCK(&node_todel->lock);
       unlock_levels(preds, highest_locked, 22);
