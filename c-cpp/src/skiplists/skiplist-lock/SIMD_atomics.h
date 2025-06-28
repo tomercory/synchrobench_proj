@@ -10,7 +10,7 @@
 
 inline void read_16_bytes_atomic(const __m128i *src, __m128i *dest){
     // Ensure src is 16-byte aligned and does not cross a cache line boundary!
-    *reinterpret_cast<volatile __m128i*>(dest) = _mm_load_si128(src);
+    *(volatile __m128i*)(dest) = _mm_load_si128(src);
 }
 
 inline void write_16_bytes_atomic(__m128i *dest, const __m128i *src){
