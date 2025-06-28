@@ -92,7 +92,7 @@ typedef struct sl_node {
 	volatile int marked;
 	volatile int fullylinked;
 	ptlock_t lock;	
-	sl_next_entry_t next_arr[1];
+	volatile sl_next_entry_t next_arr[1];
 } sl_node_t;
 
 typedef struct sl_intset {
