@@ -38,7 +38,7 @@ inline int ok_to_delete(sl_node_t *node, int found) {
 inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, sl_node_t **succs, int fast) {
   int found, i;
   sl_node_t *curr;
-  volatile sl_next_entry_t local_next_pv;
+  sl_next_entry_t local_next_pv;
 
   found = -1;
   curr = set->head;
