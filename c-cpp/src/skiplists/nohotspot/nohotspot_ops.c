@@ -215,167 +215,55 @@ int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val)
 
         /* find an entry-point to the node-level */
         item = set->top;
-        // this bug-fix does not work for some reason:
-//        while (1) {
-//                next_item = item->right.right_p;
-//                next_key = item->right.right_k;
-//                if (next_item != item->right.right_p) continue;
-//
-//                if (NULL == next_item || next_key > key) {
-//                        next_item = item->down;
-//                        if (NULL == next_item) {
-//                                node = item->node;
-//                                break;
-//                        }
-//                } else if (next_key == key) {
-//                        node = item->node;
-//                        break;
-//                }
-//
-//                if(next_key != item->down && next_key < next_item->node->key){ // debugging prints
-//                    sl_key_t nextnext = next_item->right.right_p != NULL ? next_item->right.right_p->node->key : 0;
-//                    printf("Invarinat broke! While looking for key %lu, assumed next key was %lu but it was %lu\n", key, next_key,
-//                           next_item->node->key);
-//                    printf("Current key = %lu, next next key = %lu\n", item->node->key, nextnext);
-//                }
-//                item = next_item;
-//        }
-        // this bug-fix does (but is a bit slow):
-        while (1) {
-            next_item = item->right.right_p;
-            next_key = item->right.right_k;
-            if (NULL == next_item || next_key > key) {
-                next_item = item->down;
-                if (NULL == next_item) {
-                    node = item->node;
-                    break;
-                }
-                item = next_item;
-                continue;
-            } else if (next_key == key) {
-                if(next_item->node->key == key){
-                    node = item->node;
-                    break;
-                }
-            }
+        // // validate-goback:
+        // while (1) {
+        //     next_item = item->right.right_p;
+        //     next_key = item->right.right_k;
+        //     if (NULL == next_item || next_key > key) {
+        //         next_item = item->down;
+        //         if (NULL == next_item) {
+        //             node = item->node;
+        //             break;
+        //         }
+        //         item = next_item;
+        //         continue;
+        //     } else if (next_key == key) {
+        //         if(next_item->node->key == key){
+        //             node = item->node;
+        //             break;
+        //         }
+        //     }
 
-            if (next_item->node->key > key) { // validate that going right is indeed legal, go down if not
-                if (item->down != NULL) {
-                    item = item->down;
-                } else {
-                    node = item->node;
-                    break;
-                }
-            } else
-                item = next_item;
-        }
-    // with validation prints:
-//    while (1) {
-//        next_item = item->right.right_p;
-//        next_key = item->right.right_k;
-//        if (NULL == next_item || next_key > key) {
-//            next_item = item->down;
-//            if (NULL == next_item) {
-//                node = item->node;
-//                break;
-//            }
-//            item = next_item;
-//            continue;
-//        } else if (next_key == key) {
-//            if(next_item->node->key == key){
-//                node = item->node;
-//                break;
-//            }
-//        }
-//
-//        sl_key_t real_key = next_item->node->key;
-//        if (next_item != item->right.right_p)
-//            printf("While looking for key %lu, pointer changed since its reading\n", key);
-//        if (next_key != item->right.right_k)
-//            printf("While looking for key %lu, key changed since its reading\n", key);
-//        if (next_key < real_key)
-//            printf("Invariant broke! Assumed next key (%lu) is different from the real one (%lu). Was looking for %lu.\n", next_key, real_key, key);
-//        if (real_key > key) {
-//            printf("Had to apply fix. While looking for key %lu, assumed next key was %lu, but it was actually %lu\n", key, next_key, real_key);
-//
-//            if (item->down != NULL){
-//                item = item->down;
-//            } else{
-//                node = item->node;
-//                break;
-//            }
-//        } else
-//            item = next_item;
-//    }
-      // original version:
-//        while (1) {
-//                next_item = item->right.right_p;
-//                next_key = item->right.right_k;
-//                if (NULL == next_item || next_key > key) {
-//                        next_item = item->down;
-//                        if (NULL == next_item) {
-//                                node = item->node;
-//                                break;
-//                        }
-//                } else if (next_key == key) { // might run faster without this.
-//                        node = item->node;
-//                        break;
-//                }
-//                item = next_item;
-//        }
+        //     if (next_item->node->key > key) { // validate that going right is indeed legal, go down if not
+        //         if (item->down != NULL) {
+        //             item = item->down;
+        //         } else {
+        //             node = item->node;
+        //             break;
+        //         }
+        //     } else
+        //         item = next_item;
+        // }
+   
     // SIMD atomics:
-//        struct sl_kp local_kp; // not using typedef to avoid VOLATILE on local variable
-//        while (1) {
-//                read_16_bytes_atomic((const __m128i *) &(item->right), (__m128i *) &local_kp);
-//                next_item = local_kp.right_p;
-//                next_key = local_kp.right_k;
-//                if (NULL == next_item || next_key > key) {
-//                        next_item = item->down;
-//                        if (NULL == next_item) {
-//                                node = item->node;
-//                                break;
-//                        }
-//                } else if (next_key == key) { // might run faster without this.
-//                        node = item->node;
-//                        break;
-//                }
-//
-//                // debugging print
-//                if (next_item != item->down && next_key != next_item->node->key)
-//                    printf("Atomicity problem!\nWhen looking for key= %lu, in the inode whose node's key is %lu.\nAssumed the next key is %lu but it was actually %lu. Address of sl_kp is: %lu\n"
-//                            ,key, item->node->key, next_key, next_item->node->key, (unsigned long)&(item->right));
-//
-//                item = next_item;
-//        }
+       volatile kp_t local_kp;
+       while (1) {
+               read_16_bytes_atomic((const __m128i *) &(item->right), (__m128i *) &local_kp);
+               next_item = local_kp.right_p;
+               next_key = local_kp.right_k;
+               if (NULL == next_item || next_key > key) {
+                       next_item = item->down;
+                       if (NULL == next_item) {
+                               node = item->node;
+                               break;
+                       }
+               } else if (next_key == key) { // might run faster without this.
+                       node = item->node;
+                       break;
+               }
 
-
-        // combined approach - doesn't work as well
-//        while (1) {
-//            next_item = item->right.right_p;
-//            next_key = item->right.right_k;
-//            if (NULL == next_item || next_key > key) {
-//                next_item = item->down;
-//                if (NULL == next_item) {
-//                    node = item->node;
-//                    break;
-//                }
-//                item = next_item;
-//                continue;
-//            } else if (next_key == key) {
-//                if(next_item->node->key == key){
-//                    node = item->node;
-//                    break;
-//                }
-//            }
-//
-//            if (next_item != item->right.right_p || next_key != item->right.right_k) {
-//                if (next_item->node->key > key) {
-//                    item = item->down;
-//                    continue;
-//                }
-//            }
-//            item = next_item;
-//        }
+               item = next_item;
+       }
 
         /* find the correct node and next */
         while (1) {
