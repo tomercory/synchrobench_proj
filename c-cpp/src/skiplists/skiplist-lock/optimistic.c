@@ -39,34 +39,27 @@ inline val_t optimistic_search(sl_intset_t *set, val_t val, sl_node_t **preds, s
   int found, i;
   sl_node_t *curr;
   volatile sl_next_entry_t local_next_pv;
+  sl_node_t *next;
+  val_t next_val;
 
   found = -1;
   curr = set->head;
 	
   for (i = (curr->toplevel - 1); i >= 0; i--) {
     read_16_bytes_atomic((const __m128i*)&(curr->next_arr[i]), (__m128i*) &local_next_pv);
-    // // debugging
-    // if (local_next_pv.next != NULL){
-    //   if (local_next_pv.next_val != local_next_pv.next->val){
-    //     printf("BAD atomicity at r1. Suspected key = %lu, real = %lu. misalignement: %d\n",local_next_pv.next_val, local_next_pv.next->val, (unsigned long)(&(curr->next_arr[i])) % 16);
-    //   }
-    // }
-    // //
-    while (val > local_next_pv.next_val) {
-        curr = local_next_pv.next;
+    next = local_next_pv.next;
+    next_val = local_next_pv.next_val;
+    
+    while (val > next_val) {
+        curr = next;
         read_16_bytes_atomic((const __m128i*)&(curr->next_arr[i]), (__m128i*) &local_next_pv);
-        // // debugging
-        // if (local_next_pv.next != NULL){
-        //   if (local_next_pv.next_val != local_next_pv.next->val){
-        //     printf("BAD atomicity at r2. Suspected key = %lu, real = %lu. misalignement: %d\n",local_next_pv.next_val, local_next_pv.next->val, (unsigned long)(&(curr->next_arr[i])) % 16);
-        //   }
-        // }
-        // //
+        next = local_next_pv.next;
+        next_val = local_next_pv.next_val;
     }
     if (preds != NULL)
       preds[i] = curr;
-    succs[i] = local_next_pv.next;
-    if (found == -1 && val == local_next_pv.next_val) {
+    succs[i] = next;
+    if (found == -1 && val == next_val) {
       found = i;
     }
   }
