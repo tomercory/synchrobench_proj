@@ -50,7 +50,7 @@
 #define DEFAULT_ALTERNATE               0
 #define DEFAULT_EFFECTIVE               1
 #define DEFAULT_TEST                    0
-
+#define DEFAULT_PARALLELISM             1
 #define DEFAULT_UNBALANCED              0
 
 #define XSTR(s)                         STR(s)
@@ -70,6 +70,10 @@
 int floor_log_2(unsigned int n);
 
 inline long rand_range(long r); /* declared in test.c */
+
+static inline int max(int a, int b) {
+  return (a > b) ? a : b;
+}
 
 #include "intset.h"
 #include "background.h"
@@ -191,6 +195,13 @@ typedef struct thread_data {
 	barrier_t *barrier;
 	unsigned long failures_because_contention;
 } thread_data_t;
+
+typedef struct population_data {
+  struct sl_set *set;
+  unsigned long to_populate;
+  long range; 
+  val_t* lastp;
+} population_data_t;
 
 
 void print_skiplist(struct sl_set *set) {
@@ -351,6 +362,23 @@ void *test(void *data) {
 	return NULL;
 }
 
+void* set_populate(void* data) {
+  int i;
+  sl_key_t val;
+
+  population_data_t *d = (population_data_t *)data;
+
+  unsigned int seed = rand();
+  while (i < d->to_populate) {
+    val = rand_range_re(&seed, d->range);
+    if (sl_add_old(d->set, val, DEFAULT_ELASTICITY)) {
+      i++;
+      if (d->lastp != NULL)
+        *d->lastp = val;
+    }
+  }
+}
+
 void catcher(int sig)
 {
 	printf("CAUGHT SIGNAL %d\n", sig);
@@ -369,6 +397,7 @@ int main(int argc, char **argv)
 		{"update-rate",               required_argument, NULL, 'u'},
 		{"elasticity",                required_argument, NULL, 'x'},
         {"test mode", required_argument, NULL, 'v'},
+		{"population parallelism",    required_argument, NULL, 'p'},
 		{NULL, 0, NULL, 0}
 	};
 	
@@ -380,6 +409,7 @@ int main(int argc, char **argv)
 	aborts_validate_read, aborts_validate_write, aborts_validate_commit,
 	aborts_invalid_memory, aborts_double_write, max_retries, failures_because_contention;
 	thread_data_t *data;
+	population_data_t *pop_data;
 	pthread_t *threads;
 	pthread_attr_t attr;
 	barrier_t barrier;
@@ -395,6 +425,7 @@ int main(int argc, char **argv)
 	int alternate = DEFAULT_ALTERNATE;
 	int effective = DEFAULT_EFFECTIVE;
     int test_mode = DEFAULT_TEST;
+	int pop_par = DEFAULT_PARALLELISM;
 	sigset_t block_set;
         struct sl_ptst *ptst;
         struct sl_node *temp;
@@ -403,7 +434,7 @@ int main(int argc, char **argv)
 
 	while(1) {
 		i = 0;
-		c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:U:v:"
+		c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:U:v:p:"
 										, long_options, &i);
 		
 		if(c == -1)
@@ -452,6 +483,8 @@ int main(int argc, char **argv)
                                  "  -v, --test mode (default=0)\n"
                                  "        0 = run benchmark,\n"
                                  "        non-zero = validate correctness, dictates number of validation txs,\n"
+								 "  -p, --population parallelism <int>\n"
+                				 "        Number of threads that take part in the set initialization(default=" XSTR(DEFAULT_PARALLELISM) ")\n"
 								 );
 					exit(0);
 				case 'A':
@@ -487,6 +520,9 @@ int main(int argc, char **argv)
                 case 'v':
                     test_mode = atoi(optarg);
                     break;
+				case 'p':
+					pop_par = atoi(optarg);
+					break;
 				case '?':
 					printf("Use -h or --help for help\n");
 					exit(0);
@@ -524,7 +560,11 @@ int main(int argc, char **argv)
 		perror("malloc");
 		exit(1);
 	}
-	if ((threads = (pthread_t *)malloc(nb_threads * sizeof(pthread_t))) == NULL) {
+	if ((pop_data = (population_data_t *)malloc(pop_par * sizeof(population_data_t))) == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+	if ((threads = (pthread_t *)malloc(max(nb_threads, pop_par) * sizeof(pthread_t))) == NULL) {
 		perror("malloc");
 		exit(1);
 	}
@@ -561,21 +601,43 @@ int main(int argc, char **argv)
 	
 	// Populate set 
 	printf("Adding %d entries to set\n", initial);
-	i = 0;
-	
-	while (i < initial) {
-		if (unbalanced)
-                        val = rand_range_re(&global_seed, initial);
-		else
-                        val = rand_range_re(&global_seed, range);
-		if (sl_add_old(set, val, 0)) {
-			last = val;
-			i++;
+	if (pop_par == 1 || initial < 1000000) {
+		i = 0;
+		while (i < initial) {
+			if (unbalanced)
+							val = rand_range_re(&global_seed, initial);
+			else
+							val = rand_range_re(&global_seed, range);
+			if (sl_add_old(set, val, 0)) {
+				last = val;
+				i++;
+			}
 		}
+		size = set_size(set, 1);
+		printf("Set size     : %d\n", size); // avoid sequential traversal during parallel population
+		printf("Level max    : %d\n", levelmax);
 	}
-	size = set_size(set, 1);
-	printf("Set size     : %d\n", size);
-	printf("Level max    : %d\n", levelmax);
+	else{ // currently does not support unbalanced
+		pthread_attr_init(&attr);
+		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+		for (i=0; i<pop_par; i++) {
+			pop_data[i].lastp = (i==0) ? &last : NULL;
+			pop_data[i].range = range;
+			pop_data[i].set = set;
+			pop_data[i].to_populate = initial/pop_par + ((i==0) ? (initial % pop_par) : 0);
+			if (pthread_create(&threads[i], &attr, set_populate, (void *)(&pop_data[i])) != 0) {
+				fprintf(stderr, "Error creating thread\n");
+				exit(1);
+			}
+		}
+		pthread_attr_destroy(&attr);
+		for (i = 0; i < pop_par; i++) {
+			if (pthread_join(threads[i], NULL) != 0) {
+				fprintf(stderr, "Error waiting for thread completion\n");
+				exit(1);
+			}
+		}
+  	} 
 
         // nullify all the index nodes we created so
         // we can start again and rebalance the skip list
@@ -751,8 +813,9 @@ int main(int argc, char **argv)
             if (max_retries < data[i].max_retries)
                 max_retries = data[i].max_retries;
         }
-
-        printf("Set size      : %d (expected: %d)\n", set_size(set, 1), size);
+		if (pop_par == 1 || initial < 1000000) { // we do not calculate initial size if we populate in parallel
+        	printf("Set size      : %d (expected: %d)\n", set_size(set, 1), size);
+		}
         printf("Duration      : %d (ms)\n", duration);
         printf("#txs          : %lu (%f / s)\n", reads + updates, (reads + updates) * 1000.0 / duration);
 
@@ -801,6 +864,7 @@ int main(int argc, char **argv)
 	
 	free(threads);
 	free(data);
+	free(pop_data);
 	
 	return 0;
 }
