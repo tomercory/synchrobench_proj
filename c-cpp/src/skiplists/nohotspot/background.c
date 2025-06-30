@@ -329,7 +329,7 @@ static int bg_raise_ilevel(inode_t *iprev, inode_t *iprev_tall,
 {
         int raised = 0;
         inode_t *index, *inext, *inew, *above, *above_prev;
-        volatile kp_t local_kp_inext; // to be used with the SIMD approach
+        kp_t local_kp_inext; // to be used with the SIMD approach
 
         above = above_prev = iprev_tall;
 
