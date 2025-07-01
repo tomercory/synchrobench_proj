@@ -420,6 +420,8 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
                      (AO_t)new->next_arr[i].next_key,
                      (AO_t)succ,
                      (AO_t)succ->k);
+            
+            new_next = new->next_arr[i].next_node;
             if ( is_marked_ref(new_next) ) goto success;
             assert(old_next == new_next);
         }
