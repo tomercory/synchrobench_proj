@@ -195,22 +195,21 @@ static sh_node_pt strong_search_predecessors(
 static sh_node_pt weak_search_predecessors(
     set_t *l, setkey_t k, sh_node_pt *pa, sh_node_pt *na)
 {
-    volatile next_pair_t local_next_pair;
     sh_node_pt x;
     sh_node_pt x_next;
     setkey_t  x_next_k;
     int        i;
 
     x = &l->head;
-    for ( i = NUM_LEVELS - 1; i >= 0; i-- )
+    for ( i = NUM_LEVELS - 1; i >= 1; i-- ) // do not use Foresight in level 0
     {
         for ( ; ; )
         {
-            read_16_bytes_atomic((const __m128i*)&(x->next_arr[i]), (__m128i*) &local_next_pair);
-            x_next_k = local_next_pair.next_key;
-            x_next = get_unmarked_ref(local_next_pair.next_node);
+            READ_FIELD(x_next_k, x->next_arr[i].next_key);
+            x_next = get_unmarked_ref(x->next_arr[i].next_node);
 
             if ( x_next_k >= k ) break;
+            if ( x_next->k >= k ) break; // avoid reckless advancement through validate-goback
 
             x = x_next;
         }
@@ -218,6 +217,18 @@ static sh_node_pt weak_search_predecessors(
         if ( pa ) pa[i] = x;
         if ( na ) na[i] = x_next;
     }
+    // level 0 traversal
+        for ( ; ; )
+        {
+            x_next = get_unmarked_ref(x->next_arr[i].next_node);
+            READ_FIELD(x_next_k, x_next->k);
+            if ( x_next_k >= k ) break;
+
+            x = x_next;
+        }
+
+        if ( pa ) pa[i] = x;
+        if ( na ) na[i] = x_next;
 
     return(x_next);
 }
@@ -407,7 +418,7 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
     {
         pred = preds[i];
         succ = succs[i];
-
+        
         /* Someone *can* delete @new under our feet! */
         new_next = new->next_arr[i].next_node;
         if ( is_marked_ref(new_next) ) goto success;
@@ -420,12 +431,13 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
                      (AO_t)new->next_arr[i].next_key,
                      (AO_t)succ,
                      (AO_t)succ->k);
+            new_next = new->next_arr[i].next_node;
             if ( is_marked_ref(new_next) ) goto success;
             assert(old_next == new_next);
         }
 
         /* Ensure we have unique key values at every level. */
-        if ( succ->k == k ) goto new_world_view;
+        if ( succ->k <= k ) goto new_world_view; // this handles premature descent as well
         assert((pred->k < k) && (succ->k > k));
 
         /* Replumb predecessor's forward pointer. */
@@ -500,12 +512,12 @@ int set_remove(set_t *l, setkey_t k)
     for ( i = level - 1; i >= 0; i-- )
     {
         if (!WIDE_CAS(&preds[i]->next_arr[i],
-                      (AO_t)x,
+                      (AO_t)x, // 
                       (AO_t)preds[i]->next_arr[i].next_key,
                       (AO_t)get_unmarked_ref(x->next_arr[i].next_node),
                       (AO_t)x->next_arr[i].next_key))
         {
-            if ( (i != (level - 1)) || check_for_full_delete(x) )
+            if ( (i != (level - 1)) || check_for_full_delete(x) ||  preds[i]->next_arr[i].next_node->key < k) // also check for premature descent
             {
                 MB(); /* make sure we see node at all levels. */
                 do_full_delete(ptst, l, x, i);
