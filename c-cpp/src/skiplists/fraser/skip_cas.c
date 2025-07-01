@@ -517,7 +517,7 @@ int set_remove(set_t *l, setkey_t k)
                       (AO_t)get_unmarked_ref(x->next_arr[i].next_node),
                       (AO_t)x->next_arr[i].next_key))
         {
-            if ( (i != (level - 1)) || check_for_full_delete(x) ||  preds[i]->next_arr[i].next_node->key < k) // also check for premature descent
+            if ( (i != (level - 1)) || check_for_full_delete(x) ||  preds[i]->next_arr[i].next_node->k < k) // also check for premature descent
             {
                 MB(); /* make sure we see node at all levels. */
                 do_full_delete(ptst, l, x, i);
