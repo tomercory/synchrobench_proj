@@ -44,7 +44,7 @@
 #include "set.h"
 #include "atomic_ops.h"
 #include <stdint.h>
-#include <emmintrin.h> // For SSE2 intrinsics
+#include "SIMD_atomics.h"
 
 #define WIDE_CAS(_a, _o1, _o2, _n1, _n2)                          \
 ({                                                                \
@@ -91,17 +91,6 @@ static int gc_id[NUM_LEVELS];
 /*
  * PRIVATE FUNCTIONS
  */
-
-static inline void atomic_read_next_pair(const next_pair_t *src, sh_node_pt *next_p, setkey_t *next_v) {
-    next_pair_t local_entry;
-
-    // Atomic read of 16 bytes
-    *(__m128i *)&local_entry = _mm_load_si128((const __m128i *)src);
-
-    // Extract fields
-    *next_p = local_entry.next_node;
-    *next_v = local_entry.next_key;
-}
 
 /*
  * Random level generator. Drop-off rate is 0.5 per level.
@@ -206,7 +195,9 @@ static sh_node_pt strong_search_predecessors(
 static sh_node_pt weak_search_predecessors(
     set_t *l, setkey_t k, sh_node_pt *pa, sh_node_pt *na)
 {
-    sh_node_pt x, x_next;
+    volatile next_pair_t local_next_pair;
+    sh_node_pt x;
+    sh_node_pt x_next;
     setkey_t  x_next_k;
     int        i;
 
@@ -215,8 +206,9 @@ static sh_node_pt weak_search_predecessors(
     {
         for ( ; ; )
         {
-            atomic_read_next_pair(&x->next_arr[i], &x_next, &x_next_k);
-            x_next = get_unmarked_ref(x_next);
+            read_16_bytes_atomic((const __m128i*)&(x->next_arr[i]), (__m128i*) &local_next_pair);
+            x_next_k = local_next_pair.next_key;
+            x_next = get_unmarked_ref(local_next_pair.next_node);
 
             if ( x_next_k >= k ) break;
 
