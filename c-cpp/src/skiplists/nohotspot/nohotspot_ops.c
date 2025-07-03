@@ -246,7 +246,7 @@ int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val)
         // }
    
     // SIMD atomics:
-       volatile kp_t local_kp;
+       /*volatile*/ kp_t local_kp;
        while (1) {
                read_16_bytes_atomic((const __m128i *) &(item->right), (__m128i *) &local_kp);
                next_item = local_kp.right_p;
