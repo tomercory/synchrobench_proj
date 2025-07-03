@@ -329,7 +329,7 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
     setval_t  ov, new_ov;
     ptst_t    *ptst;
     sh_node_pt preds[NUM_LEVELS], succs[NUM_LEVELS];
-    sh_node_pt pred, succ, new = NULL, new_next, old_next;
+    sh_node_pt pred, succ, new = NULL, new_next;
     int        i, level, result, retval;
     setkey_t new_next_k;
 
@@ -421,9 +421,7 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
                      (AO_t)succ,
                      (AO_t)succ->k);
             
-            new_next = new->next_arr[i].next_node;
-            if ( is_marked_ref(new_next) ) goto success;
-            assert(old_next == new_next);
+            if ( is_marked_ref(new->next_arr[i].next_node) ) goto success;
         }
 
         /* Ensure we have unique key values at every level. */
