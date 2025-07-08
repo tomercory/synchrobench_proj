@@ -474,7 +474,7 @@ int set_remove(set_t *l, setkey_t k)
 {
     setval_t  v = NULL, new_v;
     ptst_t    *ptst;
-    sh_node_pt preds[NUM_LEVELS], x;
+    sh_node_pt preds[NUM_LEVELS], x, next_node;
     int        level, i, result = 0;
 
     k = CALLER_TO_INTERNAL_KEY(k);
@@ -510,13 +510,20 @@ int set_remove(set_t *l, setkey_t k)
      */
     for ( i = level - 1; i >= 0; i-- )
     {
+        if (preds[i]->next_arr[i].next_node->k < k) // first, check for premature descent
+        {
+            MB(); /* make sure we see node at all levels. */
+            do_full_delete(ptst, l, x, i);
+            goto out;
+        }
+        next_node = get_unmarked_ref(x->next_arr[i].next_node);
         if (!WIDE_CAS(&preds[i]->next_arr[i],
                       (AO_t)x, // 
                       (AO_t)preds[i]->next_arr[i].next_key,
-                      (AO_t)get_unmarked_ref(x->next_arr[i].next_node),
-                      (AO_t)x->next_arr[i].next_key))
+                      (AO_t)next_node,
+                      (AO_t)next_node->k))
         {
-            if ( (i != (level - 1)) || check_for_full_delete(x) ||  preds[i]->next_arr[i].next_node->k < k) // also check for premature descent
+            if ( (i != (level - 1)) || check_for_full_delete(x)) 
             {
                 MB(); /* make sure we see node at all levels. */
                 do_full_delete(ptst, l, x, i);
