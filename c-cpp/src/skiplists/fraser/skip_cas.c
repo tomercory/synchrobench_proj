@@ -177,7 +177,7 @@ static sh_node_pt strong_search_predecessors(
         {
             if (!WIDE_CAS(&x->next_arr[i],
                           (AO_t)x_next,
-                          (AO_t)x->next_arr[i].next_key,
+                          (AO_t)x_next->k,
                           (AO_t)y,
                           (AO_t)y_k)) {
                 goto retry;
@@ -405,7 +405,7 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
     WMB_NEAR_CAS(); /* make sure node fully initialised before inserting */
     if (!WIDE_CAS(&preds[0]->next_arr[0],
                   (AO_t)succ,
-                  (AO_t)preds[0]->next_arr[0].next_key,
+                  (AO_t)succ->k,
                   (AO_t)new,
                   (AO_t)k)) {
         succ = strong_search_predecessors(l, k, preds, succs);
@@ -428,7 +428,7 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
         {
             WIDE_CAS(&new->next_arr[i],
                      (AO_t)new_next,
-                     (AO_t)new->next_arr[i].next_key,
+                     (AO_t)new_next->k,
                      (AO_t)succ,
                      (AO_t)succ->k);
             
@@ -442,7 +442,7 @@ int set_update(set_t *l, setkey_t k, setval_t v, int overwrite)
         /* Replumb predecessor's forward pointer. */
         if (!WIDE_CAS(&pred->next_arr[i],
                       (AO_t)succ,
-                      (AO_t)pred->next_arr[i].next_key,
+                      (AO_t)succ->k,
                       (AO_t)new,
                       (AO_t)k))
         {
@@ -519,7 +519,7 @@ int set_remove(set_t *l, setkey_t k)
         next_node = get_unmarked_ref(x->next_arr[i].next_node);
         if (!WIDE_CAS(&preds[i]->next_arr[i],
                       (AO_t)x, // 
-                      (AO_t)preds[i]->next_arr[i].next_key,
+                      (AO_t)x->k,
                       (AO_t)next_node,
                       (AO_t)next_node->k))
         {
