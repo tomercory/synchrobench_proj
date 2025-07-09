@@ -486,6 +486,11 @@ int set_remove(set_t *l, setkey_t k)
     if ( x->k > k ) goto out;
     READ_FIELD(level, x->level);
     level = level & LEVEL_MASK;
+    
+    // // debug
+    // if (x->k != k){
+    //     printf("weak search key failure!!!");
+    // }
 
     /* Once we've marked the value field, the node is effectively deleted. */
     new_v = x->v;
@@ -510,7 +515,8 @@ int set_remove(set_t *l, setkey_t k)
      */
     for ( i = level - 1; i >= 0; i-- )
     {
-        if (preds[i]->next_arr[i].next_node->k < k) // first, check for premature descent
+        next_node = get_unmarked_ref(preds[i]->next_arr[i].next_node);
+        if (next_node->k < k) // first, check for premature descent
         {
             MB(); /* make sure we see node at all levels. */
             do_full_delete(ptst, l, x, i);
@@ -519,7 +525,7 @@ int set_remove(set_t *l, setkey_t k)
         next_node = get_unmarked_ref(x->next_arr[i].next_node);
         if (!WIDE_CAS(&preds[i]->next_arr[i],
                       (AO_t)x, // 
-                      (AO_t)x->k,
+                      (AO_t)k,
                       (AO_t)next_node,
                       (AO_t)next_node->k))
         {
