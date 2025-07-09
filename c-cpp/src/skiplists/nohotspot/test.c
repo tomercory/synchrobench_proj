@@ -66,7 +66,7 @@
 #define VAL_MAX                         INT_MAX
 
 #define  RAND_TEST_RANGE                8
-#define  LOG2NUMTHREADS                 7
+#define  LOG2NUMTHREADS                 8
 #define NUM_EVENTS 9
 
 const char *events[NUM_EVENTS] = {
