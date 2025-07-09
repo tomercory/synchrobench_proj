@@ -221,7 +221,7 @@ static sh_node_pt weak_search_predecessors(
     // level 0 traversal
         for ( ; ; )
         {
-            READ_FIELD(x_next, x->next_arr[i].next_node);
+            READ_FIELD(x_next, x->next_arr[0].next_node);
             x_next = get_unmarked_ref(x_next);
             READ_FIELD(x_next_k, x_next->k);
             if ( x_next_k >= k ) break;
@@ -229,8 +229,9 @@ static sh_node_pt weak_search_predecessors(
             x = x_next;
         }
 
-        if ( pa ) pa[i] = x;
-        if ( na ) na[i] = x_next;
+        if ( pa ) pa[0] = x;
+        if ( na ) na[0] = x_next;
+    //
 
     return(x_next);
 }
