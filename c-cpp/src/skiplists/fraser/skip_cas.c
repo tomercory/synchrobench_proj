@@ -206,7 +206,8 @@ static sh_node_pt weak_search_predecessors(
         for ( ; ; )
         {
             READ_FIELD(x_next_k, x->next_arr[i].next_key);
-            x_next = get_unmarked_ref(x->next_arr[i].next_node);
+            READ_FIELD(x_next, x->next_arr[i].next_node);
+            x_next = get_unmarked_ref(x_next);
 
             if ( x_next_k >= k ) break;
             if ( x_next->k >= k ) break; // avoid reckless advancement through validate-goback
@@ -220,7 +221,8 @@ static sh_node_pt weak_search_predecessors(
     // level 0 traversal
         for ( ; ; )
         {
-            x_next = get_unmarked_ref(x->next_arr[i].next_node);
+            READ_FIELD(x_next, x->next_arr[i].next_node);
+            x_next = get_unmarked_ref(x_next);
             READ_FIELD(x_next_k, x_next->k);
             if ( x_next_k >= k ) break;
 
@@ -515,14 +517,17 @@ int set_remove(set_t *l, setkey_t k)
      */
     for ( i = level - 1; i >= 0; i-- )
     {
-        next_node = get_unmarked_ref(preds[i]->next_arr[i].next_node);
+        READ_FIELD(next_node, preds[i]->next_arr[i].next_node);
+        next_node = get_unmarked_ref(next_node);
         if (next_node->k < k) // first, check for premature descent
         {
             MB(); /* make sure we see node at all levels. */
             do_full_delete(ptst, l, x, i);
             goto out;
         }
-        next_node = get_unmarked_ref(x->next_arr[i].next_node);
+        
+        READ_FIELD(next_node, x->next_arr[i].next_node);
+        next_node = get_unmarked_ref(next_node);
         if (!WIDE_CAS(&preds[i]->next_arr[i],
                       (AO_t)x, // 
                       (AO_t)k,
