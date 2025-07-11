@@ -15,6 +15,7 @@ else
 endif
 
 CFLAGS      += -D$(ARCH) -Wno-unused-value -Wno-format #-fomit-frame-pointer
+LDFLAGS += -lpfm  # Link libpfm
 
 #CFLAGS      += $(DEBUGGING)
 COMMON_DEPS += Makefile $(wildcard *.h)
