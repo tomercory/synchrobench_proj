@@ -61,7 +61,6 @@ finished.
 #include "background.h"
 #include "garbagecoll.h"
 #include "ptst.h"
-#include "SIMD_atomics.h"
 
 /* - Private Functions - */
 
@@ -215,55 +214,35 @@ int sl_do_operation(set_t *set, sl_optype_t optype, sl_key_t key, val_t val)
 
         /* find an entry-point to the node-level */
         item = set->top;
-        // // validate-goback:
-        // while (1) {
-        //     next_item = item->right.right_p;
-        //     next_key = item->right.right_k;
-        //     if (NULL == next_item || next_key > key) {
-        //         next_item = item->down;
-        //         if (NULL == next_item) {
-        //             node = item->node;
-        //             break;
-        //         }
-        //         item = next_item;
-        //         continue;
-        //     } else if (next_key == key) {
-        //         if(next_item->node->key == key){
-        //             node = item->node;
-        //             break;
-        //         }
-        //     }
+        // validate-goback:
+        while (1) {
+            next_item = item->right.right_p;
+            next_key = item->right.right_k;
+            if (NULL == next_item || next_key > key) {
+                next_item = item->down;
+                if (NULL == next_item) {
+                    node = item->node;
+                    break;
+                }
+                item = next_item;
+                continue;
+            } else if (next_key == key) {
+                if(next_item->node->key == key){
+                    node = item->node;
+                    break;
+                }
+            }
 
-        //     if (next_item->node->key > key) { // validate that going right is indeed legal, go down if not
-        //         if (item->down != NULL) {
-        //             item = item->down;
-        //         } else {
-        //             node = item->node;
-        //             break;
-        //         }
-        //     } else
-        //         item = next_item;
-        // }
-   
-    // SIMD atomics:
-       volatile kp_t local_kp;
-       while (1) {
-               read_16_bytes_atomic((const __m128i *) &(item->right), (__m128i *) &local_kp);
-               next_item = local_kp.right_p;
-               next_key = local_kp.right_k;
-               if (NULL == next_item || next_key > key) {
-                       next_item = item->down;
-                       if (NULL == next_item) {
-                               node = item->node;
-                               break;
-                       }
-               } else if (next_key == key) { // might run faster without this.
-                       node = item->node;
-                       break;
-               }
-
-               item = next_item;
-       }
+            if (next_item->node->key > key) { // validate that going right is indeed legal, go down if not
+                if (item->down != NULL) {
+                    item = item->down;
+                } else {
+                    node = item->node;
+                    break;
+                }
+            } else
+                item = next_item;
+        }
 
         /* find the correct node and next */
         while (1) {

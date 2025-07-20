@@ -45,7 +45,7 @@ struct sl_kp {
 /* index-level nodes */
 typedef VOLATILE struct sl_inode inode_t;
 struct sl_inode {
-        struct sl_kp right; // Must ensure sl_kp is 16-byte aligned and does not cross a cache line boundary!
+        struct sl_kp right;
         struct sl_inode *down;
         struct sl_node  *node;
 };
