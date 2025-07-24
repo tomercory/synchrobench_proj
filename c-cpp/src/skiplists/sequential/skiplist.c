@@ -127,7 +127,7 @@ void sl_set_delete(sl_intset_t *set)
 
   node = set->head;
   while (node != NULL) {
-    next = node->next[0];
+    next = node->next[node->toplevel-1];
     sl_delete_node(node);
     node = next;
   }
@@ -139,11 +139,11 @@ unsigned long sl_set_size(sl_intset_t *set)
   unsigned long size = 0;
   sl_node_t *node;
 
-  node = set->head->next[0];
-  while (node->next[0] != NULL) {
+  node = set->head->next[set->head->toplevel-1];
+  while (node->next[node->toplevel-1] != NULL) {
     if (!node->deleted)
       size++;
-    node = node->next[0];
+    node = node->next[node->toplevel-1];
   }
 
   return size;
