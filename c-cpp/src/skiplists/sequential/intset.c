@@ -36,13 +36,13 @@ int sl_contains(sl_intset_t *set, val_t val, int transactional)
 	
 	node = set->head;
 	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next_arr[i].next;
-		while (node->next_arr[i].next_val < val) {
+		next = node->next_arr[node->toplevel-1-i].next;
+		while (node->next_arr[node->toplevel-1-i].next_val < val) {
 			node = next;
-			next = node->next_arr[i].next;
+			next = node->next_arr[node->toplevel-1-i].next;
 		}
 	}
-    result = (node->next_arr[0].next_val == val);
+    result = (node->next_arr[node->toplevel-1].next_val == val);
 		
 #elif defined STM
 
@@ -60,20 +60,20 @@ inline int sl_seq_add(sl_intset_t *set, val_t val) {
 	
 	node = set->head;
 	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next_arr[i].next;
-		while (node->next_arr[i].next_val < val) {
+		next = node->next_arr[node->toplevel-1-i].next;
+		while (node->next_arr[node->toplevel-1-i].next_val < val) {
 			node = next;
-			next = node->next_arr[i].next;
+			next = node->next_arr[node->toplevel-1-i].next;
 		}
 		preds[i] = node;
-		succs[i] = node->next_arr[i].next;
+		succs[i] = node->next_arr[node->toplevel-1-i].next;
 	}
-	if ((result = (node->next_arr[0].next_val != val)) == 1) {
+	if ((result = (node->next_arr[node->toplevel-1].next_val != val)) == 1) {
 		l = get_rand_level();
 		node = sl_new_simple_node(val, l, 0);
 		for (i = 0; i < l; i++) {
-            node->next_arr[i] = (sl_next_entry_t){ .next = succs[i], .next_val = succs[i]->val };
-            preds[i]->next_arr[i] = (sl_next_entry_t){ .next = node, .next_val = node->val };
+            node->next_arr[node->toplevel-1-i] = (sl_next_entry_t){ .next = succs[i], .next_val = succs[i]->val };
+            preds[i]->next_arr[preds[i]->toplevel-1-i] = (sl_next_entry_t){ .next = node, .next_val = node->val };
 		}
 	}
 	return result;
@@ -116,18 +116,18 @@ int sl_remove(sl_intset_t *set, val_t val, int transactional)
 	
 	node = set->head;
 	for (i = node->toplevel-1; i >= 0; i--) {
-		next = node->next_arr[i].next;
-		while (node->next_arr[i].next_val < val) {
+		next = node->next_arr[node->toplevel-1-i].next;
+		while (node->next_arr[node->toplevel-1-i].next_val < val) {
 			node = next;
-			next = node->next_arr[i].next;
+			next = node->next_arr[node->toplevel-1-i].next;
 		}
 		preds[i] = node;
-		succs[i] = node->next_arr[i].next;
+		succs[i] = node->next_arr[node->toplevel-1-i].next;
 	}
 	if ((result = (next->val == val)) == 1) {
 		for (i = 0; i < set->head->toplevel; i++) 
 			if (succs[i]->val == val)
-				preds[i]->next_arr[i] = succs[i]->next_arr[i];
+				preds[i]->next_arr[preds[i]->toplevel-1-i] = succs[i]->next_arr[succs[i]->toplevel-1-i];
 		sl_delete_node(next); 
 	}
 
