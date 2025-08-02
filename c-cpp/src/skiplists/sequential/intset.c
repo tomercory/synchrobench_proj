@@ -101,7 +101,7 @@ inline int sl_seq_add(sl_intset_t *set, val_t val) {
 			next = node->next[node->toplevel-1-i];
 		}
 		preds[i] = node;
-		succs[i] = node->next[i];
+		succs[i] = node->next[node->toplevel-1-i];
 	}
 	node = node->next[node->toplevel-1];
 	if ((result = (node->val != val)) == 1) {
