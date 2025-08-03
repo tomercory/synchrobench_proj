@@ -4,6 +4,7 @@ include $(ROOT)/common/Makefile.common
 
 BINS = $(BINDIR)/$(LOCK)-skiplist
 CFLAGS += -std=gnu89
+LDFLAGS += -lpfm  # Link libpfm
 
 .PHONY:	all clean
 

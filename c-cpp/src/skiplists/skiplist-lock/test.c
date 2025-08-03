@@ -22,6 +22,9 @@
  */
 
 #include "intset.h"
+#include <perfmon/pfmlib.h>
+#include <perfmon/pfmlib_perf_event.h>
+#include <string.h>
 
 pthread_key_t preds_key;
 pthread_key_t succs_key;
@@ -44,8 +47,35 @@ unsigned int levelmax;
 #define DEFAULT_ELASTICITY		          4
 #define DEFAULT_ALTERNATE               0
 #define DEFAULT_EFFECTIVE 		          1
+#define DEFAULT_MONITOR                 0
 #define DEFAULT_TEST                    0
 #define DEFAULT_PARALLELISM             1
+#define NUM_EVENTS                      9
+
+const char *events[NUM_EVENTS] = {
+  "L1-dcache-loads",
+  "L1-dcache-stores",
+  "L1-dcache-load-misses",
+  "LLC-loads",
+  "LLC-stores",
+  "LLC-load-misses",
+  "LLC-store-misses",
+  "cache-references",
+  "cache-misses"
+};
+
+
+enum event_num {
+  L1_CACHE_LOADS,
+  L1_CACHE_STORES,
+  L1_CACHE_MISSES,
+  L3_CACHE_LOADS,
+  L3_CACHE_STORES,
+  L3_CACHE_LOAD_MISSES,
+  L3_CACHE_STORE_MISSES,
+  TOTAL_CACHE_REFS,
+  TOTAL_CACHE_MISSES
+};
 
 typedef struct barrier {
   pthread_cond_t complete;
@@ -124,6 +154,7 @@ typedef struct thread_data {
   int unit_tx;
   int alternate;
   int effective;
+  int cache_monitoring;
   int validation_txs;
   unsigned long nb_add;
   unsigned long nb_added;
@@ -140,6 +171,12 @@ typedef struct thread_data {
   unsigned long nb_aborts_invalid_memory;
   unsigned long max_retries;
   unsigned int seed;
+  unsigned long L1_cache_accesses;
+  unsigned long L1_cache_misses;
+  unsigned long L3_cache_accesses;
+  unsigned long L3_cache_misses;
+  unsigned long total_cache_accesses;
+  unsigned long total_cache_misses;
   sl_intset_t *set;
   barrier_t *barrier;
   CACHE_PAD(0); // avoid false sharing with other threads
@@ -193,7 +230,8 @@ void verify_skiplist(sl_intset_t *set) {
 void *test(void *data) {
   int last = -1;
   val_t val = 0;
-  int unext; 
+  int unext;
+  int i;
   sl_node_t **preds = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
   sl_node_t **succs = (sl_node_t **)xmalloc(levelmax * sizeof(sl_node_t *));
   pthread_setspecific(preds_key, preds);
@@ -201,9 +239,50 @@ void *test(void *data) {
 	
   thread_data_t *d = (thread_data_t *)data;
 	
+
+	/* set up perf events for cache behavior */
+  int fds[NUM_EVENTS];
+  unsigned long counts[NUM_EVENTS];
+  if (d->cache_monitoring) {
+    struct perf_event_attr pe[NUM_EVENTS];
+    pfm_initialize();
+
+    for (i = 0; i < NUM_EVENTS; i++) {
+      memset(&pe[i], 0, sizeof(struct perf_event_attr));
+      pe[i].size = sizeof(struct perf_event_attr);
+      pe[i].type = PERF_TYPE_RAW;
+      pe[i].disabled = 1;
+      pe[i].exclude_kernel = 1;
+      pe[i].exclude_hv = 1;
+
+      pfm_perf_encode_arg_t arg;
+      memset(&arg, 0, sizeof(arg));
+      arg.attr = &pe[i];
+
+      if (pfm_get_os_event_encoding(events[i], PFM_PLM3, PFM_OS_PERF_EVENT, &arg) != PFM_SUCCESS) {
+          fprintf(stderr, "Error encoding event %s\n", events[i]);
+          exit(1);
+      }
+
+      fds[i] = perf_event_open(&pe[i], 0, -1, -1, 0);
+      if (fds[i] == -1) {
+          perror("perf_event_open failed");
+          exit(1);
+      }
+    }
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_RESET, 0);
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
+  }
+
+
   /* Wait on barrier */
   barrier_cross(d->barrier);
 	
+  /* start counting cache events*/
+  if (d->cache_monitoring) {
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_ENABLE, 0);
+  }
+
   /* Is the first op an update? */
   unext = (rand_range_re(&d->seed, 100) - 1 < d->update);
 
@@ -294,6 +373,19 @@ void *test(void *data) {
   //#else
   //	}
   //#endif /* ICC */
+  if (d->cache_monitoring) {
+    for (i = 0; i < NUM_EVENTS; i++) ioctl(fds[i], PERF_EVENT_IOC_DISABLE, 0);
+    for (i = 0; i < NUM_EVENTS; i++) read(fds[i], &counts[i], sizeof(uint64_t));;
+
+    d->L1_cache_accesses = counts[L1_CACHE_LOADS] + counts[L1_CACHE_STORES];
+    d->L1_cache_misses = counts[L1_CACHE_MISSES];
+    d->L3_cache_accesses = counts[L3_CACHE_LOADS] + counts[L3_CACHE_STORES];
+    d->L3_cache_misses = counts[L3_CACHE_LOAD_MISSES] + counts[L3_CACHE_STORE_MISSES];
+    d->total_cache_accesses = counts[TOTAL_CACHE_REFS];
+    d->total_cache_misses = counts[TOTAL_CACHE_MISSES];
+
+    for (i = 0; i < NUM_EVENTS; i++) close(fds[i]);
+  }
 	
   free(pthread_getspecific(preds_key));
   free(pthread_getspecific(succs_key));
@@ -373,6 +465,7 @@ int main(int argc, char **argv)
     {"seed",                      required_argument, NULL, 'S'},
     {"update-rate",               required_argument, NULL, 'u'},
     {"unit-tx",                   required_argument, NULL, 'x'},
+    {"cache monitoring", 		      required_argument, NULL, 'm'},
     {"test mode",                 required_argument, NULL, 'v'},
     {"population parallelism",    required_argument, NULL, 'p'},
     {NULL, 0, NULL, 0}
@@ -384,7 +477,8 @@ int main(int argc, char **argv)
   val_t val = 0;
   unsigned long reads, effreads, updates, effupds, aborts, aborts_locked_read, 
     aborts_locked_write, aborts_validate_read, aborts_validate_write, 
-    aborts_validate_commit, aborts_invalid_memory, max_retries;
+    aborts_validate_commit, aborts_invalid_memory, max_retries,
+    L1_cache_accesses, L1_cache_misses, L3_cache_accesses, L3_cache_misses, total_cache_accesses, total_cache_misses;
   thread_data_t *data;
   population_data_t *pop_data;
   pthread_t *threads;
@@ -401,6 +495,7 @@ int main(int argc, char **argv)
   int unit_tx = DEFAULT_ELASTICITY;
   int alternate = DEFAULT_ALTERNATE;
   int effective = DEFAULT_EFFECTIVE;
+  int cache_monitoring = DEFAULT_MONITOR;
   int test_mode = DEFAULT_TEST;
   int pop_par = DEFAULT_PARALLELISM;
   sigset_t block_set;
@@ -408,7 +503,7 @@ int main(int argc, char **argv)
   
   while(1) {
     i = 0;
-    c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:v:p:"
+    c = getopt_long(argc, argv, "hAf:d:i:t:r:S:u:x:m:v:p:"
         , long_options, &i);
     
     if(c == -1)
@@ -456,6 +551,9 @@ int main(int argc, char **argv)
                 "        4 = read/add/rem unit-tx,\n"
                 "        5 = all recursive unit-tx,\n"
                 "        6 = harris lock-free\n"
+                "  -m, --cache monitoring (default=0)\n"
+                "        0 = do not monitor cache,\n"
+                "        1 = monitor cache,\n"
                 "  -v, --test mode (default=0)\n"
                 "        0 = run benchmark,\n"
                 "        non-zero = validate correctness, dictates number of validation txs,\n"
@@ -489,6 +587,9 @@ int main(int argc, char **argv)
         break;
       case 'x':
         unit_tx = atoi(optarg);
+        break;
+      case 'm':
+        cache_monitoring = atoi(optarg);
         break;
       case 'v':
         test_mode = atoi(optarg);
@@ -648,6 +749,13 @@ int main(int argc, char **argv)
     data[i].seed = rand();
     data[i].set = set;
     data[i].barrier = &barrier;
+    data[i].cache_monitoring = cache_monitoring;
+    data[i].L1_cache_misses = 0;
+    data[i].L1_cache_accesses = 0;
+    data[i].L3_cache_misses = 0;
+    data[i].L3_cache_accesses = 0;
+    data[i].total_cache_misses = 0;
+    data[i].total_cache_accesses = 0;
     data[i].validation_txs = test_mode;
     if (test_mode) {
         data[i].first = i;
@@ -727,6 +835,13 @@ exit(1);
       updates = 0;
       effupds = 0;
       max_retries = 0;
+      L1_cache_misses = 0; 
+      L1_cache_accesses = 0;
+      L3_cache_misses = 0;
+      L3_cache_accesses = 0;
+      total_cache_misses = 0;
+      total_cache_accesses = 0;
+
       for (i = 0; i < nb_threads; i++) {
           //      printf("Thread %d\n", i);
           //      printf("  #add        : %lu\n", data[i].nb_add);
@@ -743,6 +858,12 @@ exit(1);
           //      printf("    #val-c    : %lu\n", data[i].nb_aborts_validate_commit);
           //      printf("    #inv-mem  : %lu\n", data[i].nb_aborts_invalid_memory);
           //      printf("  Max retries : %lu\n", data[i].max_retries);
+          //      printf("#L1 cache misses    : %lu\n", data[i].L1_cache_misses);
+          //      printf("#L1 cache accesses  : %lu\n", data[i].L1_cache_accesses);
+          //      printf("#L3 cache misses    : %lu\n", data[i].L3_cache_misses);
+          //      printf("#L3 cache accesses  : %lu\n", data[i].L3_cache_accesses);
+          //      printf("#total cache misses    : %lu\n", data[i].total_cache_misses);
+          //      printf("#total cache accesses  : %lu\n", data[i].total_cache_accesses);
           aborts += data[i].nb_aborts;
           aborts_locked_read += data[i].nb_aborts_locked_read;
           aborts_locked_write += data[i].nb_aborts_locked_write;
@@ -757,6 +878,12 @@ exit(1);
           updates += (data[i].nb_add + data[i].nb_remove);
           effupds += data[i].nb_removed + data[i].nb_added;
           size += data[i].nb_added - data[i].nb_removed;
+          L1_cache_misses += data[i].L1_cache_misses;
+          L1_cache_accesses += data[i].L1_cache_accesses;
+          L3_cache_misses += data[i].L3_cache_misses;
+          L3_cache_accesses += data[i].L3_cache_accesses;
+          total_cache_misses += data[i].total_cache_misses;
+          total_cache_accesses += data[i].total_cache_accesses;
           if (max_retries < data[i].max_retries)
               max_retries = data[i].max_retries;
       }
@@ -796,6 +923,17 @@ exit(1);
       printf("  #inv-mem    : %lu (%f / s)\n", aborts_invalid_memory,
               aborts_invalid_memory * 1000.0 / duration);
       printf("Max retries   : %lu\n", max_retries);
+      if (cache_monitoring) {
+        printf("#L1 cache misses    : %lu\n", L1_cache_misses);
+        printf("#L1 cache accesses  : %lu\n", L1_cache_accesses);
+        printf("#L1 cache miss%%  : %f\n", 100.0 * L1_cache_misses / L1_cache_accesses);
+        printf("#L3 cache misses    : %lu\n", L3_cache_misses);
+        printf("#L3 cache accesses  : %lu\n", L3_cache_accesses);
+        printf("#L3 cache miss%%  : %f\n", 100.0 * L3_cache_misses / L3_cache_accesses);
+        printf("#total cache misses    : %lu\n", total_cache_misses);
+        printf("#total cache accesses  : %lu\n", total_cache_accesses);
+        printf("#total cache miss%%  : %f\n", 100.0 * total_cache_misses / total_cache_accesses);
+		}
   }
   
   gc_subsystem_destroy();
